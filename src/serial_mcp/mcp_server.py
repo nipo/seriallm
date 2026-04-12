@@ -195,6 +195,28 @@ def get_port_info(port_id: str = "default") -> dict:
 
 
 @mcp.tool()
+def get_port_events(
+    since: int = 0,
+    port_id: str = "default",
+) -> list[dict]:
+    """Get connection/disconnection events for a serial port.
+
+    Returns a list of events (oldest first), each with an absolute byte offset
+    and an event type ("connected" or "disconnected"). The offset corresponds to
+    the buffer position at the time of the event — use it with read_serial to
+    split data across reconnection boundaries.
+
+    Only events within the current buffer range are retained.
+    """
+    port = _get_port(port_id)
+    return [
+        {"offset": offset, "event": event}
+        for offset, event in port.events
+        if offset >= since
+    ]
+
+
+@mcp.tool()
 def set_baudrate(baudrate: int, port_id: str = "default") -> str:
     """Change the baud rate of the serial port at runtime."""
     port = _get_port(port_id)

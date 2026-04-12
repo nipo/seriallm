@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn",
     "starlette",
     "anyio",
+    "websockets",
 ]
 
 [project.scripts]

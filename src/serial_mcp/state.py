@@ -48,10 +48,18 @@ class PortState:
     condition: anyio.Condition
     serial_port: serial.Serial | None = None
     connected: bool = False
+    events: list[tuple[int, str]] = dataclasses.field(default_factory=list)
+
+    def record_event(self, event: str) -> None:
+        self.events.append((self.buffer.end_offset, event))
+        # Trim events that fell out of the buffer
+        start = self.buffer.start_offset
+        while self.events and self.events[0][0] < start:
+            self.events.pop(0)
 
 
 @dataclasses.dataclass
 class AppState:
     ports: dict[str, PortState]
     shutdown_event: anyio.Event
-    raw_mode: bool = False
+    buffer_size: int = 1_000_000

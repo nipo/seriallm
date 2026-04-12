@@ -6,8 +6,7 @@ import anyio
 import serial
 
 if TYPE_CHECKING:
-    from serial_mcp.state import AppState, PortState
-    from serial_mcp.terminal import OutputFilter
+    from serial_mcp.state import PortState
 
 
 async def serial_send(port: PortState, data: bytes) -> None:
@@ -20,12 +19,9 @@ async def serial_send(port: PortState, data: bytes) -> None:
 
 async def serial_reader_task(
     port: PortState,
-    app: AppState,
-    output_filter: OutputFilter,
+    shutdown_event: anyio.Event,
 ) -> None:
-    from serial_mcp.terminal import write_output, write_status
-
-    while not app.shutdown_event.is_set():
+    while not shutdown_event.is_set():
         # Try to open
         try:
             ser = serial.serial_for_url(
@@ -37,11 +33,13 @@ async def serial_reader_task(
 
         port.serial_port = ser
         port.connected = True
-        write_status(f"\r\n[Connected: {port.url} @ {port.baudrate}]\r\n")
+        port.record_event("connected")
+        async with port.condition:
+            port.condition.notify_all()
 
         # Read loop
         try:
-            while not app.shutdown_event.is_set():
+            while not shutdown_event.is_set():
                 data = await anyio.to_thread.run_sync(
                     lambda: ser.read(ser.in_waiting or 1),
                     abandon_on_cancel=True,
@@ -52,12 +50,14 @@ async def serial_reader_task(
                     async with port.condition:
                         port.buffer.append(data)
                         port.condition.notify_all()
-                    write_output(data, output_filter)
-        except (serial.SerialException, OSError) as e:
-            write_status(f"\r\n[Disconnected: {e}, reconnecting...]\r\n")
+        except (serial.SerialException, OSError):
+            pass
         finally:
             port.connected = False
             port.serial_port = None
+            port.record_event("disconnected")
+            async with port.condition:
+                port.condition.notify_all()
             try:
                 ser.close()
             except Exception:
