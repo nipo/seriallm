@@ -68,12 +68,12 @@ async def _ws_session(
                             except json.JSONDecodeError:
                                 continue
                             msg_type = msg.get("type")
-                            if msg_type == "connected":
+                            if msg_type == "opened":
                                 write_status(
-                                    f"\r\n[Connected: {msg.get('url')} @ {msg.get('baudrate')}]\r\n"
+                                    f"\r\n[Port opened: {msg.get('url')} @ {msg.get('baudrate')}]\r\n"
                                 )
-                            elif msg_type == "reconnecting":
-                                write_status("\r\n[Disconnected, reconnecting...]\r\n")
+                            elif msg_type == "waiting":
+                                write_status("\r\n[Port lost, waiting...]\r\n")
                 except (websockets.exceptions.ConnectionClosed, OSError, anyio.ClosedResourceError):
                     pass
                 session_done.set()
@@ -140,7 +140,7 @@ async def run_client(
         first = True
         while not quit_event.is_set():
             if not first:
-                write_status("\r\n[Reconnecting to server...]\r\n")
+                write_status("\r\n[Disconnected, reconnecting...]\r\n")
                 await anyio.sleep(2.0)
                 if quit_event.is_set():
                     return

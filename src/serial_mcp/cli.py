@@ -88,9 +88,9 @@ async def _buffer_follower(
         if connected_changed:
             was_connected = port.connected
             if port.connected:
-                write_status(f"\r\n[Connected: {port.url} @ {port.baudrate}]\r\n")
+                write_status(f"\r\n[Port opened: {port.url} @ {port.baudrate}]\r\n")
             else:
-                write_status("\r\n[Disconnected, reconnecting...]\r\n")
+                write_status("\r\n[Port lost, waiting...]\r\n")
 
         if data:
             cursor = new_cursor

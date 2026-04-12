@@ -25,9 +25,9 @@ async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:
         if connected_changed:
             was_connected = port.connected
             if port.connected:
-                msg = {"type": "connected", "url": port.url, "baudrate": port.baudrate}
+                msg = {"type": "opened", "url": port.url, "baudrate": port.baudrate}
             else:
-                msg = {"type": "reconnecting"}
+                msg = {"type": "waiting"}
             await websocket.send_text(json.dumps(msg))
 
         if data:
