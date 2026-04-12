@@ -39,7 +39,9 @@ async def _ws_reader(
                 elif msg_type == "reconnecting":
                     write_status("\r\n[Disconnected, reconnecting...]\r\n")
     except websockets.exceptions.ConnectionClosed:
-        pass
+        write_status("\r\n[Server disconnected]\r\n")
+    except (OSError, anyio.ClosedResourceError):
+        write_status("\r\n[Connection lost]\r\n")
     shutdown_event.set()
 
 
@@ -89,7 +91,12 @@ async def run_client(
     is_tty = sys.stdin.isatty()
 
     try:
-        async with websockets.asyncio.client.connect(ws_url) as ws:
+        async with websockets.asyncio.client.connect(
+            ws_url,
+            ping_interval=5,
+            ping_timeout=10,
+            close_timeout=2,
+        ) as ws:
             shutdown_event = anyio.Event()
 
             write_status(f"\r\nAttached to {server_url} as {name!r}\r\n")
