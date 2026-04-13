@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import anyio
@@ -17,13 +18,38 @@ from serial_mcp.terminal import (
     write_status,
 )
 
+if TYPE_CHECKING:
+    from serial_mcp.config import Config
+
+
+def _make_ws_connect(
+    server_url: str, path: str, config: Config | None = None
+) -> websockets.asyncio.client.connect:
+    """Build a websockets connect object for the given server and path."""
+    ws_kwargs = dict(ping_interval=5, ping_timeout=10, close_timeout=2)
+
+    if server_url.startswith("uds:"):
+        uds_path = server_url[4:]
+        return websockets.asyncio.client.unix_connect(
+            uri=f"ws://localhost{path}", path=uds_path, **ws_kwargs
+        )
+
+    # Normalize http(s) → ws(s)
+    url = server_url.rstrip("/")
+    if url.startswith("http://"):
+        url = "ws://" + url[7:]
+    elif url.startswith("https://"):
+        url = "wss://" + url[8:]
+    elif not url.startswith(("ws://", "wss://")):
+        url = "ws://" + url
+
+    return websockets.asyncio.client.connect(f"{url}{path}", **ws_kwargs)
+
 
 async def _stdin_reader(
     stdin_send: anyio.abc.ObjectSendStream[bytes],
     quit_event: anyio.Event,
 ) -> None:
-    """Read stdin byte-by-byte. Ctrl+] sets quit_event. Bytes go to stdin_send."""
-
     def _read_one() -> bytes:
         return sys.stdin.buffer.read(1)
 
@@ -42,19 +68,14 @@ async def _stdin_reader(
 
 
 async def _ws_session(
-    ws_url: str,
+    connector: websockets.asyncio.client.connect,
     output_filter: OutputFilter,
     stdin_recv: anyio.abc.ObjectReceiveStream[bytes],
     quit_event: anyio.Event,
 ) -> None:
     """Run one WebSocket session. Returns on disconnect (for reconnect)."""
     try:
-        async with websockets.asyncio.client.connect(
-            ws_url,
-            ping_interval=5,
-            ping_timeout=10,
-            close_timeout=2,
-        ) as ws:
+        async with connector as ws:
             session_done = anyio.Event()
 
             async def _reader() -> None:
@@ -95,7 +116,6 @@ async def _ws_session(
                 tg.start_soon(_reader)
                 tg.start_soon(_sender)
 
-                # Wait for either session end or quit
                 while not session_done.is_set() and not quit_event.is_set():
                     with anyio.move_on_after(0.5):
                         await session_done.wait()
@@ -116,19 +136,10 @@ async def run_client(
     baudrate: int,
     name: str,
     raw: bool,
+    config: Config | None = None,
 ) -> None:
     params = urlencode({"url": serial_url, "baudrate": baudrate, "name": name})
-
-    # Normalize: http(s) → ws(s), strip trailing slash
-    ws_url = server_url.rstrip("/")
-    if ws_url.startswith("http://"):
-        ws_url = "ws://" + ws_url[7:]
-    elif ws_url.startswith("https://"):
-        ws_url = "wss://" + ws_url[8:]
-    elif not ws_url.startswith(("ws://", "wss://")):
-        ws_url = "ws://" + ws_url
-
-    ws_url = f"{ws_url}/ws?{params}"
+    path = f"/ws?{params}"
 
     output_filter = OutputFilter(raw=raw)
     is_tty = sys.stdin.isatty()
@@ -146,13 +157,14 @@ async def run_client(
                     return
             first = False
 
-            await _ws_session(ws_url, output_filter, stdin_recv, quit_event)
+            connector = _make_ws_connect(server_url, path, config)
+            await _ws_session(connector, output_filter, stdin_recv, quit_event)
 
         write_status("\r\n")
 
     if is_tty:
         with raw_terminal():
-            write_status(f"\r\nAttaching to {server_url} as {name!r}\r\n")
+            write_status(f"\r\nAttaching as {name!r}\r\n")
             write_status(f"Serial: {serial_url} @ {baudrate}\r\n")
             write_status("Quit: Ctrl+]\r\n")
             async with anyio.create_task_group() as tg:
@@ -162,7 +174,7 @@ async def run_client(
                 tg.cancel_scope.cancel()
         write_status("\n")
     else:
-        write_status(f"Attaching to {server_url} as {name!r}\n")
+        write_status(f"Attaching as {name!r}\n")
         write_status(f"Serial (headless): {serial_url} @ {baudrate}\n")
         async with anyio.create_task_group() as tg:
             tg.start_soon(_connection_loop)

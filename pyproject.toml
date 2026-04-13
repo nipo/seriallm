@@ -10,6 +10,7 @@ dependencies = [
     "starlette",
     "anyio",
     "websockets",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]

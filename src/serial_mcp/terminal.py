@@ -6,12 +6,8 @@ import termios
 import tty
 from typing import TYPE_CHECKING
 
-import anyio
-
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    from serial_mcp.state import AppState, PortState
 
 QUIT_KEY = 0x1D  # Ctrl+]
 
@@ -84,23 +80,3 @@ def write_output(data: bytes, output_filter: OutputFilter) -> None:
 def write_status(msg: str) -> None:
     sys.stderr.write(msg)
     sys.stderr.flush()
-
-
-async def stdin_reader_task(port: PortState, app: AppState) -> None:
-    from serial_mcp.serial_io import serial_send
-
-    def _read_one() -> bytes:
-        return sys.stdin.buffer.read(1)
-
-    while not app.shutdown_event.is_set():
-        data = await anyio.to_thread.run_sync(_read_one, abandon_on_cancel=True)
-        if not data:
-            app.shutdown_event.set()
-            return
-        if data[0] == QUIT_KEY:
-            app.shutdown_event.set()
-            return
-        try:
-            await serial_send(port, data)
-        except RuntimeError:
-            pass  # port disconnected, ignore keystroke

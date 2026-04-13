@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 
 import anyio
+import anyio.abc
 import serial
 
 
@@ -63,3 +64,28 @@ class AppState:
     ports: dict[str, PortState]
     shutdown_event: anyio.Event
     buffer_size: int = 1_000_000
+    grace_period: float = 5.0
+    _client_count: int = dataclasses.field(default=0, repr=False)
+    _grace_scope: anyio.CancelScope | None = dataclasses.field(default=None, repr=False)
+    _task_group: anyio.abc.TaskGroup | None = dataclasses.field(default=None, repr=False)
+
+    def set_task_group(self, tg: anyio.abc.TaskGroup) -> None:
+        self._task_group = tg
+
+    def client_connected(self) -> None:
+        self._client_count += 1
+        if self._grace_scope is not None:
+            self._grace_scope.cancel()
+            self._grace_scope = None
+
+    def client_disconnected(self) -> None:
+        self._client_count -= 1
+        if self._client_count <= 0 and self._task_group is not None and self.grace_period >= 0:
+            self._task_group.start_soon(self._grace_timer)
+
+    async def _grace_timer(self) -> None:
+        self._grace_scope = anyio.CancelScope()
+        with self._grace_scope:
+            await anyio.sleep(self.grace_period)
+            self.shutdown_event.set()
+        self._grace_scope = None

@@ -69,6 +69,7 @@ async def ws_serial_handler(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
+    app_state.client_connected()
 
     port = PortState(
         url=url,
@@ -97,3 +98,4 @@ async def ws_serial_handler(websocket: WebSocket) -> None:
                 pass
         port.connected = False
         port.serial_port = None
+        app_state.client_disconnected()
