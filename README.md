@@ -1,21 +1,23 @@
 # serial-mcp
 
-Serial terminal emulator with an MCP (Model Context Protocol) server.
+Serial terminal emulator with MCP (Model Context Protocol) integration.
 Combines `miniterm`/`tio`-like interactive terminal access with
-programmatic control over Streamable HTTP, so an LLM agent can
-interact with serial devices.
+programmatic control via MCP, so an LLM agent can interact with serial
+devices while the user sees everything live.
 
 ## Features
 
 - Interactive terminal on stdin/stdout (raw mode, Ctrl+] to quit)
-- MCP server on Streamable HTTP for programmatic access
+- MCP server over stdio for Claude Code integration
 - Supports local serial ports, RFC 2217, and TCP sockets (anything
   `pyserial` supports via `serial_for_url`)
 - Auto-reconnect when the port disappears (USB serial going to
   bootloader, etc.)
 - Ring buffer with absolute monotonic byte offsets — each MCP client
-  tracks its own read position, no data is lost between calls (up to
-  the buffer limit)
+  tracks its own read position, no data is lost between calls
+- Server/client architecture: multiple terminals and MCP clients share
+  one server, server auto-spawns on first use and exits when idle
+- Config file with port aliases and serial profiles
 
 ## Installation
 
@@ -23,45 +25,142 @@ interact with serial devices.
 pip install -e .
 ```
 
-## Usage
+## Quick start
 
-```
+Open a terminal to a serial port:
+
+```bash
 serial-mcp /dev/ttyUSB0 115200
-serial-mcp /dev/ttyACM0
-serial-mcp rfc2217://192.168.1.10:2217
-serial-mcp socket://192.168.1.10:12345
-serial-mcp loop://                        # loopback, for testing
 ```
 
-### Options
+A background server is automatically started. Ctrl+] to quit.
 
-| Option | Default | Description |
-|---|---|---|
-| `--mcp-port PORT` | 8808 | HTTP port for the MCP server |
-| `--mcp-host HOST` | 127.0.0.1 | Bind address for the MCP server |
-| `--raw` | off | Raw terminal mode (no output filtering) |
-| `--buffer-size N` | 1000000 | Max ring buffer size in bytes |
+## Configuration
 
-The baud rate argument is optional and defaults to 115200.
+Config file: `~/.config/serial-mcp/config.yaml`
 
-### Terminal
+```yaml
+server:
+  # Unix domain socket (default)
+  socket: ~/.config/serial-mcp/server.sock
+
+  # Or TCP socket (for remote access)
+  # address: "127.0.0.1:8808"
+
+  # Seconds before idle server exits after last client disconnects
+  grace_period: 5
+
+# Port aliases — shortcuts for serial port URLs
+alias:
+  target:
+    url: /dev/ttyUSB0
+    profile: embedded
+  debug:
+    url: rfc2217://192.168.1.10:2217
+    profile: fast
+  nucleo:
+    url: /dev/ttyACM0
+
+# Serial profiles — reusable baud rate / settings
+profile:
+  default:
+    baudrate: 115200
+  embedded:
+    baudrate: 115200
+  fast:
+    baudrate: 921600
+```
+
+With this config:
+
+```bash
+serial-mcp target          # opens /dev/ttyUSB0 at 115200
+serial-mcp debug            # opens rfc2217://192.168.1.10:2217 at 921600
+serial-mcp nucleo           # opens /dev/ttyACM0 at 115200 (default profile)
+serial-mcp /dev/ttyS0 9600  # raw URL with explicit baud rate
+```
+
+## Commands
+
+### `serial-mcp [attach] <target> [baudrate]`
+
+Open a terminal to a serial port. `<target>` is an alias name or a
+serial port URL. The baud rate is optional (defaults to the profile's
+value, or 115200).
+
+The server is auto-spawned if not already running.
+
+```bash
+serial-mcp /dev/ttyUSB0 115200
+serial-mcp target
+serial-mcp attach target --name my-port --raw
+serial-mcp attach /dev/ttyACM0 9600 --server http://remote-host:8808
+```
+
+| Option | Description |
+|---|---|
+| `--name NAME` | Port name visible in MCP tools (default: alias name or URL) |
+| `--raw` | Raw terminal mode (no output filtering) |
+| `--server URL` | Connect to a specific server instead of config/auto-spawn |
+| `--config PATH` | Use a custom config file |
+
+#### Terminal
 
 When stdin is a TTY, the tool enters raw terminal mode:
 - Everything you type is sent to the serial port
 - Everything received is printed to stdout
 - Ctrl+] quits
 
-In default mode, output is filtered: lone CR is mapped to CRLF, bare
-LF is mapped to CRLF, and non-printable control codes (except tab and
-ESC) are stripped. Use `--raw` to disable filtering.
+In default mode, output is filtered: CR is mapped to CRLF, bare LF is
+mapped to CRLF, non-printable control codes (except tab and ESC) are
+stripped, NUL bytes are removed. Use `--raw` to disable filtering.
 
-When stdin is not a TTY (e.g. piped), the terminal input is skipped and
-the tool runs in headless mode (serial reader + MCP server only).
+When stdin is not a TTY (piped), the terminal runs in headless mode
+(serial output only, no keyboard input).
 
-## MCP Tools
+### `serial-mcp serve`
 
-All tools accept an optional `port_id` parameter (default: `"default"`)
-for future multi-port support.
+Start the server explicitly. Normally not needed — the server
+auto-spawns when a client connects.
+
+```bash
+serial-mcp serve
+serial-mcp serve --background
+serial-mcp serve --buffer-size 10000000
+```
+
+| Option | Description |
+|---|---|
+| `--background` | Suppress output (used by auto-spawn) |
+| `--buffer-size N` | Max ring buffer per port in bytes (default: 1MB) |
+| `--config PATH` | Use a custom config file |
+
+The server listens on a Unix domain socket (default:
+`~/.config/serial-mcp/server.sock`) or a TCP address if configured.
+It starts with no serial ports — ports are created when terminal
+clients attach and removed when they disconnect.
+
+The server exits automatically after a grace period (default: 5s) when
+all clients disconnect.
+
+### `serial-mcp mcp`
+
+Run as an MCP server over stdio. This is what you configure Claude Code
+to launch.
+
+```bash
+serial-mcp mcp
+serial-mcp mcp --config /path/to/config.yaml
+```
+
+The MCP client connects to the shared server (auto-spawning it if
+needed) and exposes all serial port tools over stdio. It stays alive
+until the parent process (Claude Code) terminates.
+
+## MCP tools
+
+All tools accept a `port_id` parameter to select which serial port to
+operate on. Use `list_ports` to see available ports.
 
 ### `read_serial`
 
@@ -70,11 +169,12 @@ Read data from the ring buffer.
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `since` | int | 0 | Absolute byte offset to read from |
-| `up_to` | int \| null | null | Absolute byte offset to read up to (exclusive). Omit for "everything so far". |
+| `up_to` | int \| null | null | Absolute byte offset to stop at (exclusive) |
+| `port_id` | string | "default" | Port to read from |
 
-Returns `{ data, start, end }` where `start` and `end` are the actual
-byte offsets of the returned data. If `since` is before the buffer
-start (oldest data was trimmed), `start > since`.
+Returns `{ data, start, end }`. The `end` value is the offset to pass
+as `since` on the next call to get only new data. If `start > since`,
+older data was evicted from the buffer.
 
 ### `send`
 
@@ -83,6 +183,7 @@ Send a UTF-8 string to the serial port.
 | Parameter | Type | Description |
 |---|---|---|
 | `data` | string | The string to send |
+| `port_id` | string | Port to send to |
 
 ### `send_bytes`
 
@@ -91,6 +192,7 @@ Send raw bytes (hex-encoded) to the serial port.
 | Parameter | Type | Description |
 |---|---|---|
 | `hex_data` | string | Hex string, e.g. `"0d0a"` for CR LF |
+| `port_id` | string | Port to send to |
 
 ### `wait_for`
 
@@ -101,6 +203,7 @@ Wait for a regex pattern to appear in serial output.
 | `pattern` | string | | Regex pattern to search for |
 | `since` | int | 0 | Search from this absolute byte offset |
 | `timeout` | float | 10.0 | Timeout in seconds |
+| `port_id` | string | "default" | Port to watch |
 
 Returns `{ offset, end, match }` — the byte offset range and matched
 text. Use `read_serial(since=..., up_to=...)` to get surrounding
@@ -114,6 +217,7 @@ Set DTR and/or RTS control lines.
 |---|---|---|---|
 | `dtr` | bool \| null | null | Set DTR (null = don't change) |
 | `rts` | bool \| null | null | Set RTS (null = don't change) |
+| `port_id` | string | "default" | Port to control |
 
 ### `send_break`
 
@@ -122,11 +226,24 @@ Send a serial break signal.
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `duration` | float | 0.25 | Break duration in seconds |
+| `port_id` | string | "default" | Port to send break on |
 
 ### `get_port_info`
 
 Returns baud rate, connection status, buffer offsets, and control line
-states (CTS, DSR, RI, CD, DTR, RTS).
+states (CTS, DSR, RI, CD, DTR, RTS). The `buffer_end` value is the
+current absolute byte offset — use it as `since` in `read_serial` to
+start reading from "now".
+
+### `get_port_events`
+
+Returns connection/disconnection events with their buffer offsets.
+Use to detect reconnection boundaries in the data stream.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `since` | int | 0 | Only return events at or after this offset |
+| `port_id` | string | "default" | Port to query |
 
 ### `set_baudrate`
 
@@ -135,16 +252,19 @@ Change the baud rate at runtime.
 | Parameter | Type | Description |
 |---|---|---|
 | `baudrate` | int | New baud rate |
+| `port_id` | string | Port to change |
 
 ### `list_ports`
 
-List all configured serial ports with their connection status and baud
-rate.
+List all currently attached serial ports with their connection status
+and baud rate.
 
-## Typical MCP Usage Pattern
+## Typical MCP usage patterns
 
-The ring buffer uses absolute byte offsets that only increase. A client
-tracks its read position to avoid re-reading data:
+### Following serial output
+
+The ring buffer uses absolute byte offsets that only increase. Track
+your read position to avoid re-reading data:
 
 ```
 cursor = 0
@@ -160,7 +280,9 @@ response = read_serial(since=cursor, up_to=result["end"])
 cursor = response["end"]
 ```
 
-For device reset flows (e.g. ESP32 bootloader entry):
+### Device reset flow
+
+For devices like ESP32 that use DTR/RTS for bootloader entry:
 
 ```
 set_control_lines(dtr=False, rts=True)   # assert RESET
@@ -169,51 +291,71 @@ set_control_lines(dtr=False, rts=False)  # release both
 wait_for(pattern="waiting for download", timeout=5.0)
 ```
 
-## Configuring with Claude Code
+### Detecting reconnections
 
-Add the MCP server to your project:
+When a USB serial device disappears and reappears (e.g. bootloader
+reset), use `get_port_events` to find the boundary:
 
-```bash
-claude mcp add --transport http serial-mcp http://localhost:8808/mcp
+```
+events = get_port_events(since=cursor)
+# [{"offset": 1523, "event": "disconnected"}, {"offset": 1523, "event": "connected"}]
 ```
 
-Or add it to your `.mcp.json`:
+## Configuring with Claude Code
+
+Add serial-mcp as an MCP server:
+
+```bash
+claude mcp add serial-mcp serial-mcp mcp
+```
+
+Or add to `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "serial-mcp": {
-      "type": "http",
-      "url": "http://localhost:8808/mcp"
+      "command": "serial-mcp",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Then start `serial-mcp` before your Claude Code session:
+Then open a terminal to your device in a separate shell:
 
 ```bash
-# Terminal 1: start serial-mcp
 serial-mcp /dev/ttyUSB0 115200
-
-# Terminal 2: start Claude Code
-claude
 ```
 
-Claude can now use the serial port tools to interact with the device.
-You also see everything live in terminal 1.
+Claude can now use the serial port tools. You see the serial I/O live
+in your terminal, and Claude interacts with the same port
+programmatically.
 
-### Remote access
+If you only need MCP access (no terminal), just configure Claude Code
+and start using the tools — the server and MCP client handle everything
+automatically. Attach a terminal later with `serial-mcp <port>` to see
+live output.
 
-Since the MCP server uses Streamable HTTP, you can expose it over the
-network by binding to `0.0.0.0`:
+## Architecture
 
-```bash
-serial-mcp /dev/ttyUSB0 115200 --mcp-host 0.0.0.0 --mcp-port 8808
+```
+serial-mcp serve          (background server, auto-spawned)
+    ├── /ws               WebSocket for terminal clients
+    └── /ws/mcp           WebSocket for MCP tool clients (JSON-RPC)
+
+serial-mcp <target>       (terminal client, connects via /ws)
+serial-mcp mcp            (MCP stdio client, connects via /ws/mcp)
 ```
 
-Then configure Claude Code on a remote machine:
+The server manages serial ports and ring buffers. Terminal clients
+attach via WebSocket for real-time I/O. The MCP stdio client proxies
+tool calls to the server via JSON-RPC over WebSocket.
 
-```bash
-claude mcp add --transport http serial-mcp http://serial-host:8808/mcp
-```
+Port lifecycle is tied to terminal clients: when a terminal client
+connects, the server opens the serial port; when it disconnects, the
+port is closed. MCP clients can access any port that has an active
+terminal client.
+
+The server auto-spawns on first client connection and exits after a
+configurable grace period when all clients disconnect.
