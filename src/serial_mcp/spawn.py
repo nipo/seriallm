@@ -81,6 +81,6 @@ async def connect_or_spawn(
             pass
 
     raise RuntimeError(
-        "Failed to connect to serial-mcp server after spawning. "
-        "Check server logs or start it manually with 'serial-mcp serve'."
+        "Failed to connect to serial_mcp server after spawning. "
+        "Check server logs or start it manually with 'serial_mcp serve'."
     )

@@ -21,7 +21,7 @@ def _silence_logs() -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="serial-mcp",
+        prog="serial_mcp",
         description="Serial terminal emulator with MCP server",
     )
     p.add_argument("--config", type=Path, default=None, help="Config file path")
@@ -105,7 +105,7 @@ async def _async_serve(args: argparse.Namespace, config: Config) -> None:
             app_state.shutdown_event.set()
 
     if not args.background:
-        write_status(f"serial-mcp server: {listen_desc}\n")
+        write_status(f"serial_mcp server: {listen_desc}\n")
 
     try:
         async with anyio.create_task_group() as tg:

@@ -1,4 +1,4 @@
-"""MCP stdio client that proxies tool calls to the serial-mcp server via WebSocket."""
+"""MCP stdio client that proxies tool calls to the serial_mcp server via WebSocket."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from mcp.server import FastMCP
 if TYPE_CHECKING:
     from serial_mcp.config import Config
 
-mcp = FastMCP("serial-mcp")
+mcp = FastMCP("serial_mcp")
 
 
 class McpProxy:
