@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import dataclasses
+import os
+import sys
 from pathlib import Path
 
 import yaml
 
-DEFAULT_CONFIG_PATH = Path("~/.config/seriallm/config.yaml")
-DEFAULT_SOCKET_PATH = Path("~/.config/seriallm/server.sock")
+_IS_WINDOWS = sys.platform == "win32"
+
+if _IS_WINDOWS:
+    _config_dir = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / "seriallm"
+else:
+    _config_dir = Path("~/.config/seriallm")
+
+DEFAULT_CONFIG_PATH = _config_dir / "config.yaml"
+DEFAULT_SOCKET_PATH = _config_dir / "server.sock"
+DEFAULT_TCP_ADDRESS = "127.0.0.1:18808"
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_BAUDRATE = 115200
 
@@ -19,25 +29,32 @@ class ServerConfig:
 
     @property
     def is_uds(self) -> bool:
-        return self.address is None
+        if self.address is not None:
+            return False
+        if self.socket is not None:
+            return True
+        # No explicit config — platform default
+        return not _IS_WINDOWS
 
     @property
     def uds_path(self) -> Path:
-        assert self.is_uds
         return self.socket if self.socket else DEFAULT_SOCKET_PATH
 
     @property
+    def effective_address(self) -> str:
+        """Return the TCP address, falling back to the default on Windows."""
+        if self.address is not None:
+            return self.address
+        return DEFAULT_TCP_ADDRESS
+
+    @property
     def host(self) -> str:
-        assert not self.is_uds
-        assert self.address is not None
-        host, _, _ = self.address.rpartition(":")
+        host, _, _ = self.effective_address.rpartition(":")
         return host or "127.0.0.1"
 
     @property
     def port(self) -> int:
-        assert not self.is_uds
-        assert self.address is not None
-        _, _, port_str = self.address.rpartition(":")
+        _, _, port_str = self.effective_address.rpartition(":")
         return int(port_str)
 
 

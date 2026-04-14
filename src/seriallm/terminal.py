@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import contextlib
 import sys
-import termios
-import tty
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+_IS_WINDOWS = sys.platform == "win32"
+
+if _IS_WINDOWS:
+    import msvcrt
+else:
+    import termios
+    import tty
 
 QUIT_KEY = 0x1D  # Ctrl+]
 
@@ -61,6 +67,9 @@ class OutputFilter:
 
 @contextlib.contextmanager
 def raw_terminal() -> Generator[None]:
+    if _IS_WINDOWS:
+        yield
+        return
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -68,6 +77,13 @@ def raw_terminal() -> Generator[None]:
         yield
     finally:
         termios.tcsetattr(fd, termios.TCSAFLUSH, old)
+
+
+def read_stdin_byte() -> bytes:
+    """Read a single byte from stdin, blocking. Works in raw mode on both platforms."""
+    if _IS_WINDOWS:
+        return msvcrt.getch()
+    return sys.stdin.buffer.read(1)
 
 
 def write_output(data: bytes, output_filter: OutputFilter) -> None:

@@ -12,6 +12,8 @@ import websockets.exceptions
 if TYPE_CHECKING:
     from seriallm.config import Config
 
+_IS_WINDOWS = sys.platform == "win32"
+
 RETRY_DELAYS = [0.1, 0.2, 0.5, 1.0, 2.0]
 
 
@@ -46,13 +48,23 @@ def _spawn_server(config: Config) -> None:
     if config.config_path is not None:
         cmd.extend(["--config", str(config.config_path)])
     cmd.extend(["serve", "--background"])
-    subprocess.Popen(
-        cmd,
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=devnull,
-        stderr=devnull,
-    )
+
+    if _IS_WINDOWS:
+        subprocess.Popen(
+            cmd,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            stdin=subprocess.DEVNULL,
+            stdout=devnull,
+            stderr=devnull,
+        )
+    else:
+        subprocess.Popen(
+            cmd,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=devnull,
+            stderr=devnull,
+        )
 
 
 async def connect_or_spawn(

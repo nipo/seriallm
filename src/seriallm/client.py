@@ -14,6 +14,7 @@ from seriallm.terminal import (
     QUIT_KEY,
     OutputFilter,
     raw_terminal,
+    read_stdin_byte,
     write_output,
     write_status,
 )
@@ -50,12 +51,9 @@ async def _stdin_reader(
     stdin_send: anyio.abc.ObjectSendStream[bytes],
     quit_event: anyio.Event,
 ) -> None:
-    def _read_one() -> bytes:
-        return sys.stdin.buffer.read(1)
-
     try:
         while not quit_event.is_set():
-            data = await anyio.to_thread.run_sync(_read_one, abandon_on_cancel=True)
+            data = await anyio.to_thread.run_sync(read_stdin_byte, abandon_on_cancel=True)
             if not data:
                 quit_event.set()
                 return
