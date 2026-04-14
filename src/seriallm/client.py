@@ -10,7 +10,7 @@ import anyio.abc
 import websockets.asyncio.client
 import websockets.exceptions
 
-from serial_mcp.terminal import (
+from seriallm.terminal import (
     QUIT_KEY,
     OutputFilter,
     raw_terminal,
@@ -19,7 +19,7 @@ from serial_mcp.terminal import (
 )
 
 if TYPE_CHECKING:
-    from serial_mcp.config import Config
+    from seriallm.config import Config
 
 
 def _make_ws_connect(

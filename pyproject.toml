@@ -1,5 +1,5 @@
 [project]
-name = "serial_mcp"
+name = "seriallm"
 version = "0.1.0"
 description = "Serial terminal emulator with MCP server for LLM-driven serial port interaction"
 readme = "README.md"
@@ -35,12 +35,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nipo/serial_mcp"
-Repository = "https://github.com/nipo/serial_mcp"
-Issues = "https://github.com/nipo/serial_mcp/issues"
+Homepage = "https://github.com/nipo/seriallm"
+Repository = "https://github.com/nipo/seriallm"
+Issues = "https://github.com/nipo/seriallm/issues"
 
 [project.scripts]
-serial_mcp = "serial_mcp.cli:main_sync"
+seriallm = "seriallm.cli:main_sync"
 
 [build-system]
 requires = ["setuptools>=68"]

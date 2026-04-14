@@ -8,10 +8,10 @@ from pathlib import Path
 import anyio
 import uvicorn
 
-from serial_mcp.app import create_app
-from serial_mcp.config import Config, load_config
-from serial_mcp.state import AppState
-from serial_mcp.terminal import write_status
+from seriallm.app import create_app
+from seriallm.config import Config, load_config
+from seriallm.state import AppState
+from seriallm.terminal import write_status
 
 
 def _silence_logs() -> None:
@@ -21,7 +21,7 @@ def _silence_logs() -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="serial_mcp",
+        prog="seriallm",
         description="Serial terminal emulator with MCP server",
     )
     p.add_argument("--config", type=Path, default=None, help="Config file path")
@@ -105,7 +105,7 @@ async def _async_serve(args: argparse.Namespace, config: Config) -> None:
             app_state.shutdown_event.set()
 
     if not args.background:
-        write_status(f"serial_mcp server: {listen_desc}\n")
+        write_status(f"seriallm server: {listen_desc}\n")
 
     try:
         async with anyio.create_task_group() as tg:
@@ -122,8 +122,8 @@ async def _async_serve(args: argparse.Namespace, config: Config) -> None:
 
 
 async def _async_attach(args: argparse.Namespace, config: Config) -> None:
-    from serial_mcp.client import run_client
-    from serial_mcp.spawn import connect_or_spawn
+    from seriallm.client import run_client
+    from seriallm.spawn import connect_or_spawn
 
     # Resolve target (alias or raw URL)
     serial_url, default_baudrate = config.resolve_target(args.target)
@@ -151,7 +151,7 @@ async def _async_attach(args: argparse.Namespace, config: Config) -> None:
 
 
 async def _async_mcp(config: Config) -> None:
-    from serial_mcp.mcp_client import run_mcp_stdio
+    from seriallm.mcp_client import run_mcp_stdio
 
     await run_mcp_stdio(config)
 

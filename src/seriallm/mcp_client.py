@@ -1,4 +1,4 @@
-"""MCP stdio client that proxies tool calls to the serial_mcp server via WebSocket."""
+"""MCP stdio client that proxies tool calls to the seriallm server via WebSocket."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ import websockets.exceptions
 from mcp.server import FastMCP
 
 if TYPE_CHECKING:
-    from serial_mcp.config import Config
+    from seriallm.config import Config
 
-mcp = FastMCP("serial_mcp")
+mcp = FastMCP("seriallm")
 
 
 class McpProxy:
@@ -224,7 +224,7 @@ async def list_ports() -> list[dict]:
 
 
 async def run_mcp_stdio(config: Config) -> None:
-    from serial_mcp.spawn import connect_or_spawn
+    from seriallm.spawn import connect_or_spawn
 
     global _proxy
 

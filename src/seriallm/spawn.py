@@ -10,7 +10,7 @@ import websockets.asyncio.client
 import websockets.exceptions
 
 if TYPE_CHECKING:
-    from serial_mcp.config import Config
+    from seriallm.config import Config
 
 RETRY_DELAYS = [0.1, 0.2, 0.5, 1.0, 2.0]
 
@@ -42,7 +42,7 @@ def _spawn_server(config: Config) -> None:
             sock_path.unlink()
 
     devnull = open(os.devnull, "w")
-    cmd = [sys.executable, "-m", "serial_mcp"]
+    cmd = [sys.executable, "-m", "seriallm"]
     if config.config_path is not None:
         cmd.extend(["--config", str(config.config_path)])
     cmd.extend(["serve", "--background"])
@@ -81,6 +81,6 @@ async def connect_or_spawn(
             pass
 
     raise RuntimeError(
-        "Failed to connect to serial_mcp server after spawning. "
-        "Check server logs or start it manually with 'serial_mcp serve'."
+        "Failed to connect to seriallm server after spawning. "
+        "Check server logs or start it manually with 'seriallm serve'."
     )

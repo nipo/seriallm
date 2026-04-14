@@ -6,8 +6,8 @@ from typing import Any
 
 import anyio
 
-from serial_mcp.serial_io import serial_send
-from serial_mcp.state import AppState, PortState
+from seriallm.serial_io import serial_send
+from seriallm.state import AppState, PortState
 
 
 class ToolExecutor:

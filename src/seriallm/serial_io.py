@@ -6,7 +6,7 @@ import anyio
 import serial
 
 if TYPE_CHECKING:
-    from serial_mcp.state import PortState
+    from seriallm.state import PortState
 
 
 async def serial_send(port: PortState, data: bytes) -> None:

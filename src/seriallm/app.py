@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
 
-from serial_mcp.ws_handler import ws_serial_handler
-from serial_mcp.ws_mcp_handler import ws_mcp_handler
+from seriallm.ws_handler import ws_serial_handler
+from seriallm.ws_mcp_handler import ws_mcp_handler
 
 if TYPE_CHECKING:
-    from serial_mcp.state import AppState
+    from seriallm.state import AppState
 
 
 def create_app(app_state: AppState) -> Starlette:

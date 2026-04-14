@@ -5,8 +5,8 @@ import json
 import anyio
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from serial_mcp.serial_io import serial_reader_task, serial_send
-from serial_mcp.state import AppState, PortState, RingBuffer
+from seriallm.serial_io import serial_reader_task, serial_send
+from seriallm.state import AppState, PortState, RingBuffer
 
 
 async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:

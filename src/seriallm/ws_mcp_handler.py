@@ -4,8 +4,8 @@ import json
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from serial_mcp.state import AppState
-from serial_mcp.tool_executor import ToolExecutor
+from seriallm.state import AppState
+from seriallm.tool_executor import ToolExecutor
 
 
 async def ws_mcp_handler(websocket: WebSocket) -> None:

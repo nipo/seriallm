@@ -1,4 +1,4 @@
-# serial_mcp
+# SeriaLLM
 
 Serial terminal emulator with MCP (Model Context Protocol) integration.
 Combines `miniterm`/`tio`-like interactive terminal access with
@@ -8,7 +8,7 @@ devices while the user sees everything live.
 ## Features
 
 - Interactive terminal on stdin/stdout (raw mode, Ctrl+] to quit)
-- MCP server over stdio for Claude Code integration
+- MCP server over stdio for LLM integration
 - Supports local serial ports, RFC 2217, and TCP sockets (anything
   `pyserial` supports via `serial_for_url`)
 - Auto-reconnect when the port disappears (USB serial going to
@@ -22,7 +22,7 @@ devices while the user sees everything live.
 ## Installation
 
 ```
-pip install serial_mcp
+pip install seriallm
 ```
 
 ## Quick start
@@ -30,19 +30,19 @@ pip install serial_mcp
 Open a terminal to a serial port:
 
 ```bash
-serial_mcp /dev/ttyUSB0 115200
+seriallm /dev/ttyUSB0 115200
 ```
 
 A background server is automatically started. Ctrl+] to quit.
 
 ## Configuration
 
-Config file: `~/.config/serial_mcp/config.yaml`
+Config file: `~/.config/seriallm/config.yaml`
 
 ```yaml
 server:
   # Unix domain socket (default)
-  socket: ~/.config/serial_mcp/server.sock
+  socket: ~/.config/seriallm/server.sock
 
   # Or TCP socket (for remote access)
   # address: "127.0.0.1:8808"
@@ -74,15 +74,15 @@ profile:
 With this config:
 
 ```bash
-serial_mcp target          # opens /dev/ttyUSB0 at 115200
-serial_mcp debug            # opens rfc2217://192.168.1.10:2217 at 921600
-serial_mcp nucleo           # opens /dev/ttyACM0 at 115200 (default profile)
-serial_mcp /dev/ttyS0 9600  # raw URL with explicit baud rate
+seriallm target          # opens /dev/ttyUSB0 at 115200
+seriallm debug            # opens rfc2217://192.168.1.10:2217 at 921600
+seriallm nucleo           # opens /dev/ttyACM0 at 115200 (default profile)
+seriallm /dev/ttyS0 9600  # raw URL with explicit baud rate
 ```
 
 ## Commands
 
-### `serial_mcp [attach] <target> [baudrate]`
+### `seriallm [attach] <target> [baudrate]`
 
 Open a terminal to a serial port. `<target>` is an alias name or a
 serial port URL. The baud rate is optional (defaults to the profile's
@@ -91,10 +91,10 @@ value, or 115200).
 The server is auto-spawned if not already running.
 
 ```bash
-serial_mcp /dev/ttyUSB0 115200
-serial_mcp target
-serial_mcp attach target --name my-port --raw
-serial_mcp attach /dev/ttyACM0 9600 --server http://remote-host:8808
+seriallm /dev/ttyUSB0 115200
+seriallm target
+seriallm attach target --name my-port --raw
+seriallm attach /dev/ttyACM0 9600 --server http://remote-host:8808
 ```
 
 | Option | Description |
@@ -118,15 +118,15 @@ stripped, NUL bytes are removed. Use `--raw` to disable filtering.
 When stdin is not a TTY (piped), the terminal runs in headless mode
 (serial output only, no keyboard input).
 
-### `serial_mcp serve`
+### `seriallm serve`
 
 Start the server explicitly. Normally not needed — the server
 auto-spawns when a client connects.
 
 ```bash
-serial_mcp serve
-serial_mcp serve --background
-serial_mcp serve --buffer-size 10000000
+seriallm serve
+seriallm serve --background
+seriallm serve --buffer-size 10000000
 ```
 
 | Option | Description |
@@ -136,21 +136,21 @@ serial_mcp serve --buffer-size 10000000
 | `--config PATH` | Use a custom config file |
 
 The server listens on a Unix domain socket (default:
-`~/.config/serial_mcp/server.sock`) or a TCP address if configured.
+`~/.config/seriallm/server.sock`) or a TCP address if configured.
 It starts with no serial ports — ports are created when terminal
 clients attach and removed when they disconnect.
 
 The server exits automatically after a grace period (default: 5s) when
 all clients disconnect.
 
-### `serial_mcp mcp`
+### `seriallm mcp`
 
 Run as an MCP server over stdio. This is what you configure Claude Code
 to launch.
 
 ```bash
-serial_mcp mcp
-serial_mcp mcp --config /path/to/config.yaml
+seriallm mcp
+seriallm mcp --config /path/to/config.yaml
 ```
 
 The MCP client connects to the shared server (auto-spawning it if
@@ -303,10 +303,10 @@ events = get_port_events(since=cursor)
 
 ## Configuring with Claude Code
 
-Add serial_mcp as an MCP server:
+Add seriallm as an MCP server:
 
 ```bash
-claude mcp add serial_mcp serial_mcp mcp
+claude mcp add seriallm seriallm mcp
 ```
 
 Or add to `.mcp.json`:
@@ -314,8 +314,8 @@ Or add to `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "serial_mcp": {
-      "command": "serial_mcp",
+    "seriallm": {
+      "command": "seriallm",
       "args": ["mcp"]
     }
   }
@@ -325,7 +325,7 @@ Or add to `.mcp.json`:
 Then open a terminal to your device in a separate shell:
 
 ```bash
-serial_mcp /dev/ttyUSB0 115200
+seriallm /dev/ttyUSB0 115200
 ```
 
 Claude can now use the serial port tools. You see the serial I/O live
@@ -334,18 +334,18 @@ programmatically.
 
 If you only need MCP access (no terminal), just configure Claude Code
 and start using the tools — the server and MCP client handle everything
-automatically. Attach a terminal later with `serial_mcp <port>` to see
+automatically. Attach a terminal later with `seriallm <port>` to see
 live output.
 
 ## Architecture
 
 ```
-serial_mcp serve          (background server, auto-spawned)
+seriallm serve          (background server, auto-spawned)
     ├── /ws               WebSocket for terminal clients
     └── /ws/mcp           WebSocket for MCP tool clients (JSON-RPC)
 
-serial_mcp <target>       (terminal client, connects via /ws)
-serial_mcp mcp            (MCP stdio client, connects via /ws/mcp)
+seriallm <target>       (terminal client, connects via /ws)
+seriallm mcp            (MCP stdio client, connects via /ws/mcp)
 ```
 
 The server manages serial ports and ring buffers. Terminal clients

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_CONFIG_PATH = Path("~/.config/serial-mcp/config.yaml")
-DEFAULT_SOCKET_PATH = Path("~/.config/serial-mcp/server.sock")
+DEFAULT_CONFIG_PATH = Path("~/.config/seriallm/config.yaml")
+DEFAULT_SOCKET_PATH = Path("~/.config/seriallm/server.sock")
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_BAUDRATE = 115200
 
