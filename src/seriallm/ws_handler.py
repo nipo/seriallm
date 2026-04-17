@@ -9,6 +9,9 @@ from seriallm.serial_io import serial_reader_task, serial_send
 from seriallm.state import AppState, PortState, RingBuffer
 
 
+_WS_CHUNK_SIZE = 4096
+
+
 async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:
     cursor = port.buffer.end_offset
     was_connected: bool | None = None  # sentinel: always report initial state
@@ -32,7 +35,8 @@ async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:
 
         if data:
             cursor = new_cursor
-            await websocket.send_bytes(data)
+            for i in range(0, len(data), _WS_CHUNK_SIZE):
+                await websocket.send_bytes(data[i:i + _WS_CHUNK_SIZE])
 
 
 async def _ws_receive_loop(
