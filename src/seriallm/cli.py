@@ -30,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # --- serve ---
     sp_serve = sub.add_parser("serve", help="Start server (no serial ports until clients attach)")
     sp_serve.add_argument("--background", action="store_true", help="Run in background (suppress output)")
-    sp_serve.add_argument("--buffer-size", type=int, default=1_000_000, help="Max ring buffer per port (default: 1MB)")
+    sp_serve.add_argument("--buffer-size", type=int, default=None, help="Max ring buffer per port (default: from config or 1MB)")
 
     # --- attach ---
     sp_attach = sub.add_parser("attach", help="Attach to server as terminal client")
@@ -77,7 +77,7 @@ async def _async_serve(args: argparse.Namespace, config: Config) -> None:
     app_state = AppState(
         ports={},
         shutdown_event=anyio.Event(),
-        buffer_size=args.buffer_size,
+        buffer_size=args.buffer_size if args.buffer_size is not None else config.server.buffer_size,
         grace_period=config.server.grace_period,
     )
 

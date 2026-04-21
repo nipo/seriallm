@@ -19,6 +19,7 @@ DEFAULT_SOCKET_PATH = _config_dir / "server.sock"
 DEFAULT_TCP_ADDRESS = "127.0.0.1:18808"
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_BAUDRATE = 115200
+DEFAULT_BUFFER_SIZE = 1_000_000
 
 
 @dataclasses.dataclass(frozen=True)
@@ -26,6 +27,7 @@ class ServerConfig:
     socket: Path | None = None
     address: str | None = None
     grace_period: float = DEFAULT_GRACE_PERIOD
+    buffer_size: int = DEFAULT_BUFFER_SIZE
 
     @property
     def is_uds(self) -> bool:
@@ -105,6 +107,7 @@ def load_config(path: Path | None = None) -> Config:
         socket=Path(raw_server["socket"]).expanduser() if "socket" in raw_server else None,
         address=raw_server.get("address"),
         grace_period=float(raw_server.get("grace_period", DEFAULT_GRACE_PERIOD)),
+        buffer_size=int(raw_server.get("buffer_size", DEFAULT_BUFFER_SIZE)),
     )
 
     # Parse profiles section
