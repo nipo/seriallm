@@ -214,6 +214,33 @@ async def set_baudrate(baudrate: int, port_id: str = "default") -> str:
 
 
 @mcp.tool()
+async def dump_to_file(
+    path: str,
+    since: int = 0,
+    up_to: int | None = None,
+    port_id: str = "default",
+) -> dict:
+    """Dump a range of the serial port ring buffer to a file.
+
+    Writes raw bytes from the buffer to a file on disk. Useful for extracting
+    serial log segments for offline analysis without transferring data through
+    MCP.
+
+    Parameters:
+    - path: file path to write to (parent directories created if needed).
+    - since: absolute byte offset to start from (default: 0 = buffer start).
+    - up_to: absolute byte offset to stop at (exclusive). Omit for everything.
+    - port_id: port to dump from.
+
+    Returns {path, start, end, bytes_written}.
+    """
+    assert _proxy is not None
+    return await _proxy.call(
+        "dump_to_file", path=path, since=since, up_to=up_to, port_id=port_id
+    )
+
+
+@mcp.tool()
 async def list_ports() -> list[dict]:
     """List all configured serial ports and their status."""
     assert _proxy is not None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -28,6 +29,7 @@ class ToolExecutor:
         "get_port_events": "get_port_events",
         "set_baudrate": "set_baudrate",
         "list_ports": "list_ports",
+        "dump_to_file": "dump_to_file",
     }
 
     def __init__(self, app_state: AppState) -> None:
@@ -166,6 +168,16 @@ class ToolExecutor:
         if port.serial_port is not None and port.connected:
             port.serial_port.baudrate = baudrate
         return "ok"
+
+    def dump_to_file(
+        self, path: str, since: int = 0, up_to: int | None = None, port_id: str = "default"
+    ) -> dict:
+        port = self._get_port(port_id)
+        data, start, end = port.buffer.read(since, up_to)
+        out = Path(path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        return {"path": str(out), "start": start, "end": end, "bytes_written": len(data)}
 
     def list_ports(self) -> list[dict]:
         return [
