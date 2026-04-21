@@ -30,6 +30,7 @@ class ToolExecutor:
         "set_baudrate": "set_baudrate",
         "list_ports": "list_ports",
         "dump_to_file": "dump_to_file",
+        "grep": "grep",
     }
 
     def __init__(self, app_state: AppState) -> None:
@@ -178,6 +179,47 @@ class ToolExecutor:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
         return {"path": str(out), "start": start, "end": end, "bytes_written": len(data)}
+
+    def grep(
+        self,
+        pattern: str,
+        since: int = 0,
+        up_to: int | None = None,
+        context: int = 0,
+        port_id: str = "default",
+    ) -> list[dict]:
+        port = self._get_port(port_id)
+        data, start, end = port.buffer.read(since, up_to)
+        if not data:
+            return []
+
+        text = data.decode("utf-8", errors="replace")
+        lines = text.split("\n")
+        regex = re.compile(pattern)
+
+        # Build line offset table (byte offset of each line start relative to `start`)
+        line_offsets: list[int] = []
+        offset = 0
+        for line in lines:
+            line_offsets.append(offset)
+            offset += len(line.encode("utf-8", errors="replace")) + 1  # +1 for \n
+
+        matches = []
+        matched_lines: set[int] = set()
+        for i, line in enumerate(lines):
+            if regex.search(line):
+                for j in range(max(0, i - context), min(len(lines), i + context + 1)):
+                    matched_lines.add(j)
+
+        for i in sorted(matched_lines):
+            line_start = start + line_offsets[i]
+            matches.append({
+                "line": lines[i],
+                "offset": line_start,
+                "line_number": i,
+            })
+
+        return matches
 
     def list_ports(self) -> list[dict]:
         return [

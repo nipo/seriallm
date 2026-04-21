@@ -241,6 +241,34 @@ async def dump_to_file(
 
 
 @mcp.tool()
+async def grep(
+    pattern: str,
+    since: int = 0,
+    up_to: int | None = None,
+    context: int = 0,
+    port_id: str = "default",
+) -> list[dict]:
+    """Search for a regex pattern in the serial port ring buffer, line by line.
+
+    Returns matching lines (and optional context lines) with their absolute byte
+    offsets. Similar to grep on the buffered serial output.
+
+    Parameters:
+    - pattern: regex pattern to search for.
+    - since: absolute byte offset to start from (default: 0 = buffer start).
+    - up_to: absolute byte offset to stop at (exclusive). Omit for everything.
+    - context: number of lines to include before and after each match (like grep -C).
+    - port_id: port to search.
+
+    Returns a list of {line, offset, line_number} for each matching/context line.
+    """
+    assert _proxy is not None
+    return await _proxy.call(
+        "grep", pattern=pattern, since=since, up_to=up_to, context=context, port_id=port_id
+    )
+
+
+@mcp.tool()
 async def list_ports() -> list[dict]:
     """List all configured serial ports and their status."""
     assert _proxy is not None
