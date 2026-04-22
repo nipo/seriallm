@@ -7,6 +7,7 @@ from typing import Any
 
 import anyio
 
+from seriallm.offset import OffsetExpr, resolve_offset
 from seriallm.serial_io import serial_send
 from seriallm.state import AppState, PortState
 
@@ -22,7 +23,6 @@ class ToolExecutor:
         "read_serial": "read_serial",
         "send": "send",
         "send_bytes": "send_bytes",
-        "wait_for": "wait_for",
         "set_control_lines": "set_control_lines",
         "send_break": "send_break",
         "get_port_info": "get_port_info",
@@ -51,11 +51,17 @@ class ToolExecutor:
 
     # --- Tool implementations ---
 
-    def read_serial(
-        self, since: int = 0, up_to: int | None = None, port_id: str = "default"
+    async def read_serial(
+        self,
+        since: OffsetExpr = 0,
+        up_to: OffsetExpr = None,
+        port_id: str = "default",
     ) -> dict:
         port = self._get_port(port_id)
-        data, start, end = port.buffer.read(since, up_to)
+        since_val = await resolve_offset(since, port, default=0)
+        up_to_val = await resolve_offset(up_to, port, default=None)
+        assert since_val is not None
+        data, start, end = port.buffer.read(since_val, up_to_val)
         return {
             "data": data.decode("utf-8", errors="replace"),
             "start": start,
@@ -71,37 +77,6 @@ class ToolExecutor:
         port = self._get_port(port_id)
         await serial_send(port, bytes.fromhex(hex_data))
         return "ok"
-
-    async def wait_for(
-        self,
-        pattern: str,
-        since: int = 0,
-        timeout: float = 10.0,
-        port_id: str = "default",
-    ) -> dict:
-        port = self._get_port(port_id)
-        regex = re.compile(pattern)
-
-        with anyio.fail_after(timeout):
-            async with port.condition:
-                while True:
-                    data, start, end = port.buffer.read(since)
-                    if data:
-                        text = data.decode("utf-8", errors="replace")
-                        m = regex.search(text)
-                        if m:
-                            prefix_bytes = len(
-                                text[: m.start()].encode("utf-8", errors="replace")
-                            )
-                            match_bytes = len(
-                                m.group(0).encode("utf-8", errors="replace")
-                            )
-                            return {
-                                "offset": start + prefix_bytes,
-                                "end": start + prefix_bytes + match_bytes,
-                                "match": m.group(0),
-                            }
-                    await port.condition.wait()
 
     def set_control_lines(
         self,
@@ -153,14 +128,16 @@ class ToolExecutor:
                 pass
         return info
 
-    def get_port_events(
-        self, since: int = 0, port_id: str = "default"
+    async def get_port_events(
+        self, since: OffsetExpr = 0, port_id: str = "default"
     ) -> list[dict]:
         port = self._get_port(port_id)
+        since_val = await resolve_offset(since, port, default=0)
+        assert since_val is not None
         return [
             {"offset": offset, "event": event}
             for offset, event in port.events
-            if offset >= since
+            if offset >= since_val
         ]
 
     def set_baudrate(self, baudrate: int, port_id: str = "default") -> str:
@@ -170,26 +147,36 @@ class ToolExecutor:
             port.serial_port.baudrate = baudrate
         return "ok"
 
-    def dump_to_file(
-        self, path: str, since: int = 0, up_to: int | None = None, port_id: str = "default"
+    async def dump_to_file(
+        self,
+        path: str,
+        since: OffsetExpr = 0,
+        up_to: OffsetExpr = None,
+        port_id: str = "default",
     ) -> dict:
         port = self._get_port(port_id)
-        data, start, end = port.buffer.read(since, up_to)
+        since_val = await resolve_offset(since, port, default=0)
+        up_to_val = await resolve_offset(up_to, port, default=None)
+        assert since_val is not None
+        data, start, end = port.buffer.read(since_val, up_to_val)
         out = Path(path).expanduser()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
         return {"path": str(out), "start": start, "end": end, "bytes_written": len(data)}
 
-    def grep(
+    async def grep(
         self,
         pattern: str,
-        since: int = 0,
-        up_to: int | None = None,
+        since: OffsetExpr = 0,
+        up_to: OffsetExpr = None,
         context: int = 0,
         port_id: str = "default",
     ) -> list[dict]:
         port = self._get_port(port_id)
-        data, start, end = port.buffer.read(since, up_to)
+        since_val = await resolve_offset(since, port, default=0)
+        up_to_val = await resolve_offset(up_to, port, default=None)
+        assert since_val is not None
+        data, start, end = port.buffer.read(since_val, up_to_val)
         if not data:
             return []
 
@@ -204,22 +191,20 @@ class ToolExecutor:
             line_offsets.append(offset)
             offset += len(line.encode("utf-8", errors="replace")) + 1  # +1 for \n
 
-        matches = []
         matched_lines: set[int] = set()
         for i, line in enumerate(lines):
             if regex.search(line):
                 for j in range(max(0, i - context), min(len(lines), i + context + 1)):
                     matched_lines.add(j)
 
-        for i in sorted(matched_lines):
-            line_start = start + line_offsets[i]
-            matches.append({
+        return [
+            {
                 "line": lines[i],
-                "offset": line_start,
+                "offset": start + line_offsets[i],
                 "line_number": i,
-            })
-
-        return matches
+            }
+            for i in sorted(matched_lines)
+        ]
 
     def list_ports(self) -> list[dict]:
         return [

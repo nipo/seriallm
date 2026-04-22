@@ -15,6 +15,21 @@ if TYPE_CHECKING:
 
 mcp = FastMCP("seriallm")
 
+OFFSET_EXPR_DOC = """
+Offset parameters accept:
+- An integer: absolute byte offset. Negative counts from buffer end (-100 = 100 bytes before end).
+- An object: a server-side offset expression:
+  {"method": "last_reconnect"} — offset of last port connection (0 if none).
+  {"method": "last_disconnect"} — offset of last port disconnection (0 if none).
+  {"method": "first_match", "pattern": "<regex>", "edge": "start"|"end"} — first match in buffer.
+  {"method": "latest_match", "pattern": "<regex>", "edge": "start"|"end"} — last match in buffer.
+  {"method": "wait_for_match", "pattern": "<regex>", "edge": "start"|"end", "timeout": <seconds>}
+      — blocks until pattern appears, then resolves to match offset.
+  All expressions accept an optional "after" field (itself an offset expression) to constrain
+  the search to data after the resolved offset. Example:
+  {"method": "wait_for_match", "pattern": "done", "timeout": 10, "after": {"method": "last_reconnect"}}
+"""
+
 
 class McpProxy:
     """Sends JSON-RPC requests over WebSocket and awaits responses."""
@@ -59,7 +74,6 @@ class McpProxy:
                     self._results[req_id] = msg.get("result")
                 self._pending[req_id].set()
         except (websockets.exceptions.ConnectionClosed, OSError):
-            # Signal all pending calls
             for req_id, event in self._pending.items():
                 self._results[req_id] = RuntimeError("Server connection lost")
                 event.set()
@@ -73,31 +87,21 @@ _proxy: McpProxy | None = None
 
 @mcp.tool()
 async def read_serial(
-    since: int = 0,
-    up_to: int | None = None,
+    since: int | dict | None = 0,
+    up_to: int | dict | None = None,
     port_id: str = "default",
 ) -> dict:
-    """Read data received from the serial port.
+    f"""Read data received from the serial port.
 
-    This server maintains a ring buffer of all bytes received. Each byte has an
-    absolute offset that starts at 0 when the server launches and only increases
-    (it never resets or wraps). The response `end` value is the offset to pass
-    as `since` on the next call to get only new data.
+    The server maintains a ring buffer of all bytes received. Each byte has an
+    absolute offset that starts at 0 when the server launches and only increases.
+    The response `end` value is the offset to pass as `since` on the next call.
 
     IMPORTANT: To follow the stream without re-reading or missing data, always
     use the `end` value from the previous response as `since` for the next call.
 
-    Parameters:
-    - since: read data starting from this absolute byte offset (default: 0 = from start).
-    - up_to: stop reading at this absolute byte offset (exclusive). Omit to get
-      everything available.
-
-    Returns {data, start, end}:
-    - data: the received text (UTF-8, lossy).
-    - start: actual start offset of returned data. If start > since, older data
-      was evicted from the buffer.
-    - end: offset just past the last byte returned. Use this as `since` next time.
-    """
+    Returns {{data, start, end}}.
+    {OFFSET_EXPR_DOC}"""
     assert _proxy is not None
     return await _proxy.call("read_serial", since=since, up_to=up_to, port_id=port_id)
 
@@ -120,37 +124,6 @@ async def send_bytes(hex_data: str, port_id: str = "default") -> str:
     """
     assert _proxy is not None
     return await _proxy.call("send_bytes", hex_data=hex_data, port_id=port_id)
-
-
-@mcp.tool()
-async def wait_for(
-    pattern: str,
-    since: int = 0,
-    timeout: float = 10.0,
-    port_id: str = "default",
-) -> dict:
-    """Wait for a regex pattern to appear in serial output.
-
-    Blocks until the pattern matches or timeout expires. The search considers
-    all buffered data from absolute byte offset `since` onward, including data
-    that has already been received AND data that arrives while waiting.
-
-    IMPORTANT: `since` uses the same absolute byte offset as read_serial. Use
-    the `end` value from a previous read_serial call to only search new data,
-    or 0 to search from the beginning of the buffer.
-
-    Returns {offset, end, match}:
-    - offset: absolute byte offset where the match starts.
-    - end: absolute byte offset just past the match.
-    - match: the matched text.
-
-    Use read_serial(since=..., up_to=...) to retrieve context around the match.
-    After processing, use `end` from read_serial as `since` for subsequent calls.
-    """
-    assert _proxy is not None
-    return await _proxy.call(
-        "wait_for", pattern=pattern, since=since, timeout=timeout, port_id=port_id
-    )
 
 
 @mcp.tool()
@@ -190,18 +163,14 @@ async def get_port_info(port_id: str = "default") -> dict:
 
 @mcp.tool()
 async def get_port_events(
-    since: int = 0,
+    since: int | dict | None = 0,
     port_id: str = "default",
 ) -> list[dict]:
-    """Get connection/disconnection events for a serial port.
+    f"""Get connection/disconnection events for a serial port.
 
     Returns a list of events (oldest first), each with an absolute byte offset
-    and an event type ("connected" or "disconnected"). The offset corresponds to
-    the buffer position at the time of the event — use it with read_serial to
-    split data across reconnection boundaries.
-
-    Only events within the current buffer range are retained.
-    """
+    and an event type ("connected" or "disconnected").
+    {OFFSET_EXPR_DOC}"""
     assert _proxy is not None
     return await _proxy.call("get_port_events", since=since, port_id=port_id)
 
@@ -216,24 +185,17 @@ async def set_baudrate(baudrate: int, port_id: str = "default") -> str:
 @mcp.tool()
 async def dump_to_file(
     path: str,
-    since: int = 0,
-    up_to: int | None = None,
+    since: int | dict | None = 0,
+    up_to: int | dict | None = None,
     port_id: str = "default",
 ) -> dict:
-    """Dump a range of the serial port ring buffer to a file.
+    f"""Dump a range of the serial port ring buffer to a file.
 
     Writes raw bytes from the buffer to a file on disk. Useful for extracting
-    serial log segments for offline analysis without transferring data through
-    MCP.
+    serial log segments for offline analysis.
 
-    Parameters:
-    - path: file path to write to (parent directories created if needed).
-    - since: absolute byte offset to start from (default: 0 = buffer start).
-    - up_to: absolute byte offset to stop at (exclusive). Omit for everything.
-    - port_id: port to dump from.
-
-    Returns {path, start, end, bytes_written}.
-    """
+    Returns {{path, start, end, bytes_written}}.
+    {OFFSET_EXPR_DOC}"""
     assert _proxy is not None
     return await _proxy.call(
         "dump_to_file", path=path, since=since, up_to=up_to, port_id=port_id
@@ -243,25 +205,24 @@ async def dump_to_file(
 @mcp.tool()
 async def grep(
     pattern: str,
-    since: int = 0,
-    up_to: int | None = None,
+    since: int | dict | None = 0,
+    up_to: int | dict | None = None,
     context: int = 0,
     port_id: str = "default",
 ) -> list[dict]:
-    """Search for a regex pattern in the serial port ring buffer, line by line.
+    f"""Search for a regex pattern in the serial port ring buffer, line by line.
 
     Returns matching lines (and optional context lines) with their absolute byte
     offsets. Similar to grep on the buffered serial output.
 
-    Parameters:
-    - pattern: regex pattern to search for.
-    - since: absolute byte offset to start from (default: 0 = buffer start).
-    - up_to: absolute byte offset to stop at (exclusive). Omit for everything.
-    - context: number of lines to include before and after each match (like grep -C).
-    - port_id: port to search.
+    The `up_to` offset can use a wait_for_match expression to block until a
+    pattern appears, enabling single-call workflows like:
+      grep(pattern="ERROR", since={{"method": "last_reconnect"}},
+           up_to={{"method": "wait_for_match", "pattern": "test complete",
+                   "timeout": 30, "after": {{"method": "last_reconnect"}}}})
 
-    Returns a list of {line, offset, line_number} for each matching/context line.
-    """
+    Returns a list of {{line, offset, line_number}} for each matching/context line.
+    {OFFSET_EXPR_DOC}"""
     assert _proxy is not None
     return await _proxy.call(
         "grep", pattern=pattern, since=since, up_to=up_to, context=context, port_id=port_id
