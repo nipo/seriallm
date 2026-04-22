@@ -15,20 +15,47 @@ if TYPE_CHECKING:
 
 mcp = FastMCP("seriallm")
 
-OFFSET_EXPR_DOC = """
-Offset parameters accept:
-- An integer: absolute byte offset. Negative counts from buffer end (-100 = 100 bytes before end).
-- An object: a server-side offset expression:
-  {"method": "last_reconnect"} — offset of last port connection (0 if none).
-  {"method": "last_disconnect"} — offset of last port disconnection (0 if none).
-  {"method": "first_match", "pattern": "<regex>", "edge": "start"|"end"} — first match in buffer.
-  {"method": "latest_match", "pattern": "<regex>", "edge": "start"|"end"} — last match in buffer.
+OFFSET_DOC = """\
+Offset parameters (`since`, `up_to`) accept an integer or an expression object.
+
+Integers:
+  - Positive: absolute byte offset in the buffer.
+  - Negative: relative to buffer end (-100 = 100 bytes before current end).
+
+Expression objects (resolved server-side, avoiding round-trips):
+  {"method": "last_reconnect"}
+      Byte offset of the most recent port connection event. Returns 0 if the
+      port has been connected since start. Use this to scope queries to the
+      current device session (e.g. after a reboot).
+
+  {"method": "last_disconnect"}
+      Byte offset of the most recent port disconnection event.
+
+  {"method": "first_match", "pattern": "<regex>", "edge": "start"|"end"}
+      Byte offset of the first regex match in the buffer. Error if not found.
+      "edge" selects the start or end of the matched text.
+
+  {"method": "latest_match", "pattern": "<regex>", "edge": "start"|"end"}
+      Byte offset of the last regex match in the buffer. Error if not found.
+
   {"method": "wait_for_match", "pattern": "<regex>", "edge": "start"|"end", "timeout": <seconds>}
-      — blocks until pattern appears, then resolves to match offset.
-  All expressions accept an optional "after" field (itself an offset expression) to constrain
-  the search to data after the resolved offset. Example:
-  {"method": "wait_for_match", "pattern": "done", "timeout": 10, "after": {"method": "last_reconnect"}}
-"""
+      Blocks until the pattern appears in the buffer, then resolves to the
+      match offset. Raises an error on timeout. Use this as `up_to` to wait
+      for a delimiter before reading/grepping.
+
+Chaining with "after":
+  All expressions accept an optional "after" field (itself an offset expression).
+  The search is constrained to data after the resolved "after" offset. This
+  avoids matching stale data from previous sessions.
+
+  Example: wait for "done" but only after the last reconnect:
+    {"method": "wait_for_match", "pattern": "done", "timeout": 30,
+     "after": {"method": "last_reconnect"}}
+
+PREFER offset expressions over manual offset tracking. Instead of calling
+get_port_events to find the reconnect offset, then calling read_serial with
+that offset, use a single call with {"method": "last_reconnect"} as `since`.
+This reduces round-trips and lets the server resolve everything atomically."""
 
 
 class McpProxy:
@@ -93,15 +120,21 @@ async def read_serial(
 ) -> dict:
     f"""Read data received from the serial port.
 
-    The server maintains a ring buffer of all bytes received. Each byte has an
-    absolute offset that starts at 0 when the server launches and only increases.
-    The response `end` value is the offset to pass as `since` on the next call.
+    Returns {{data, start, end}} where `start` and `end` are the actual byte
+    offsets of the returned data. Use `end` as `since` on the next call to
+    continue reading without gaps.
 
-    IMPORTANT: To follow the stream without re-reading or missing data, always
-    use the `end` value from the previous response as `since` for the next call.
+    Prefer offset expressions to minimize round-trips. For example, to read
+    everything since the device last rebooted:
+        read_serial(since={{"method": "last_reconnect"}})
 
-    Returns {{data, start, end}}.
-    {OFFSET_EXPR_DOC}"""
+    To read a command response (between the command echo and the next prompt):
+        read_serial(
+            since={{"method": "first_match", "pattern": "my_command", "edge": "end",
+                    "after": -200}},
+            up_to={{"method": "wait_for_match", "pattern": ">", "timeout": 5,
+                    "after": -200}})
+    {OFFSET_DOC}"""
     assert _proxy is not None
     return await _proxy.call("read_serial", since=since, up_to=up_to, port_id=port_id)
 
@@ -110,7 +143,11 @@ async def read_serial(
 async def send(data: str, port_id: str = "default") -> str:
     """Send a UTF-8 string to the serial port.
 
-    The sent data will be echoed back by read_serial only if the device echoes it.
+    Common patterns:
+    - Send a command: send(data="help\\r\\n")
+    - Send Ctrl+C: send(data="\\x03")
+
+    The sent data will be echoed back by read_serial only if the device echoes.
     """
     assert _proxy is not None
     return await _proxy.call("send", data=data, port_id=port_id)
@@ -121,6 +158,7 @@ async def send_bytes(hex_data: str, port_id: str = "default") -> str:
     """Send raw bytes to the serial port.
 
     `hex_data` is a hex-encoded string, e.g. "0d0a" sends CR LF.
+    Use this for binary protocols or non-UTF-8 data.
     """
     assert _proxy is not None
     return await _proxy.call("send_bytes", hex_data=hex_data, port_id=port_id)
@@ -132,7 +170,12 @@ async def set_control_lines(
     rts: bool | None = None,
     port_id: str = "default",
 ) -> str:
-    """Set DTR and/or RTS control lines on the serial port."""
+    """Set DTR and/or RTS control lines on the serial port.
+
+    Common patterns:
+    - Reset an ESP32: set DTR=false,RTS=true then DTR=false,RTS=false.
+    - Enter bootloader: toggle DTR/RTS in the device-specific sequence.
+    """
     assert _proxy is not None
     return await _proxy.call(
         "set_control_lines", dtr=dtr, rts=rts, port_id=port_id
@@ -153,9 +196,9 @@ async def send_break(
 async def get_port_info(port_id: str = "default") -> dict:
     """Get serial port status: baud rate, control lines, buffer offsets, connection state.
 
-    The buffer_end value is the current absolute byte offset (total bytes
-    received since server start). Use it as `since` in read_serial to start
-    reading from "now" (ignoring past data).
+    Returns buffer_start and buffer_end which are the current buffer boundaries.
+    You usually don't need these for offset tracking — prefer offset expressions
+    like {{"method": "last_reconnect"}} instead of manually reading buffer_end.
     """
     assert _proxy is not None
     return await _proxy.call("get_port_info", port_id=port_id)
@@ -168,9 +211,11 @@ async def get_port_events(
 ) -> list[dict]:
     f"""Get connection/disconnection events for a serial port.
 
-    Returns a list of events (oldest first), each with an absolute byte offset
-    and an event type ("connected" or "disconnected").
-    {OFFSET_EXPR_DOC}"""
+    Returns a list of {{offset, event}} objects. Useful for understanding the
+    full reconnection history. For simple "since last reboot" queries, prefer
+    using {{"method": "last_reconnect"}} as an offset expression directly in
+    read_serial or grep — it avoids a round-trip.
+    {OFFSET_DOC}"""
     assert _proxy is not None
     return await _proxy.call("get_port_events", since=since, port_id=port_id)
 
@@ -189,13 +234,16 @@ async def dump_to_file(
     up_to: int | dict | None = None,
     port_id: str = "default",
 ) -> dict:
-    f"""Dump a range of the serial port ring buffer to a file.
+    f"""Dump a range of the serial port buffer to a local file.
 
-    Writes raw bytes from the buffer to a file on disk. Useful for extracting
-    serial log segments for offline analysis.
+    Writes raw bytes directly to disk without going through MCP. Use this to
+    extract log segments for offline analysis with external tools.
 
     Returns {{path, start, end, bytes_written}}.
-    {OFFSET_EXPR_DOC}"""
+
+    Example — dump everything since last reboot to a file:
+        dump_to_file(path="/tmp/boot.log", since={{"method": "last_reconnect"}})
+    {OFFSET_DOC}"""
     assert _proxy is not None
     return await _proxy.call(
         "dump_to_file", path=path, since=since, up_to=up_to, port_id=port_id
@@ -210,19 +258,24 @@ async def grep(
     context: int = 0,
     port_id: str = "default",
 ) -> list[dict]:
-    f"""Search for a regex pattern in the serial port ring buffer, line by line.
+    f"""Search for a regex pattern in the serial port buffer, line by line.
 
-    Returns matching lines (and optional context lines) with their absolute byte
-    offsets. Similar to grep on the buffered serial output.
+    Returns matching lines with their byte offsets. Use `context` to include
+    surrounding lines (like grep -C).
 
-    The `up_to` offset can use a wait_for_match expression to block until a
-    pattern appears, enabling single-call workflows like:
-      grep(pattern="ERROR", since={{"method": "last_reconnect"}},
-           up_to={{"method": "wait_for_match", "pattern": "test complete",
-                   "timeout": 30, "after": {{"method": "last_reconnect"}}}})
+    PREFER combining offset expressions to do complex queries in a single call.
+
+    Example — find all errors between last reboot and test completion:
+        grep(pattern="ERROR|FAIL",
+             since={{"method": "last_reconnect"}},
+             up_to={{"method": "wait_for_match", "pattern": "test complete",
+                     "timeout": 30, "after": {{"method": "last_reconnect"}}}})
+
+    This single call: waits for the test to finish, then returns every matching
+    line from the current boot session. No intermediate calls needed.
 
     Returns a list of {{line, offset, line_number}} for each matching/context line.
-    {OFFSET_EXPR_DOC}"""
+    {OFFSET_DOC}"""
     assert _proxy is not None
     return await _proxy.call(
         "grep", pattern=pattern, since=since, up_to=up_to, context=context, port_id=port_id
@@ -231,7 +284,11 @@ async def grep(
 
 @mcp.tool()
 async def list_ports() -> list[dict]:
-    """List all configured serial ports and their status."""
+    """List all currently attached serial ports with their connection status and baud rate.
+
+    Returns a list of {port_id, url, connected, baudrate}. Use port_id values
+    as the port_id parameter in other tools.
+    """
     assert _proxy is not None
     return await _proxy.call("list_ports")
 
