@@ -11,20 +11,24 @@ Expression types:
   {"method": "last_disconnect"}
       Offset of the last "disconnected" event. Returns 0 if no events.
 
-  {"method": "first_match", "pattern": "...", "edge": "start"|"end", "after": <expr>}
-      First regex match in the buffer, searching forward from `after`.
+  {"method": "first_match", "pattern": "...", "edge": "start"|"end", "since": <expr>}
+      First regex match in the buffer, searching forward from `since`.
       Error if not found.
 
-  {"method": "latest_match", "pattern": "...", "edge": "start"|"end", "after": <expr>}
-      Last regex match in the buffer, searching from `after` to end.
+  {"method": "latest_match", "pattern": "...", "edge": "start"|"end", "since": <expr>}
+      Last regex match in the buffer, searching from `since` to end.
       Error if not found.
 
   {"method": "wait_for_match", "pattern": "...", "edge": "start"|"end",
-   "timeout": float, "after": <expr>}
+   "timeout": float, "since": <expr>}
       Like first_match but blocks until found or timeout.
 
-All expressions accept an optional "after" field (itself an offset expression)
-that constrains the search to data after the resolved offset.
+The optional "since" field on each expression constrains the search to data
+after the resolved offset. Defaults to buffer start.
+
+When an expression appears as the tool's `up_to` argument, its `since` field
+defaults to the tool's resolved `since` value (so "wait for X" naturally means
+"wait for the next X after the start of the range").
 """
 
 from __future__ import annotations
@@ -38,13 +42,48 @@ from seriallm.state import PortState
 
 OffsetExpr = int | dict[str, Any] | None
 
+_COMMON_FIELDS = {"method", "since"}
+_EDGE_VALUES = {"start", "end"}
+
+_ALLOWED_FIELDS: dict[str, set[str]] = {
+    "last_reconnect": _COMMON_FIELDS,
+    "last_disconnect": _COMMON_FIELDS,
+    "first_match": _COMMON_FIELDS | {"pattern", "edge"},
+    "latest_match": _COMMON_FIELDS | {"pattern", "edge"},
+    "wait_for_match": _COMMON_FIELDS | {"pattern", "edge", "timeout"},
+}
+
+
+def _validate_expr(expr: dict, method: str) -> None:
+    allowed = _ALLOWED_FIELDS.get(method)
+    if allowed is None:
+        raise ValueError(f"Unknown offset method: {method!r}")
+    extra = set(expr.keys()) - allowed
+    if extra:
+        raise ValueError(
+            f"Offset method {method!r} got unknown field(s): {sorted(extra)}; "
+            f"allowed fields: {sorted(allowed)}"
+        )
+    edge = expr.get("edge", "start")
+    if edge not in _EDGE_VALUES:
+        raise ValueError(
+            f"Invalid edge {edge!r}; must be 'start' or 'end'"
+        )
+
 
 async def resolve_offset(
-    expr: OffsetExpr, port: PortState, default: int | None = None
+    expr: OffsetExpr,
+    port: PortState,
+    default: int | None = None,
+    default_since: int | None = None,
 ) -> int | None:
     """Resolve an offset expression to an absolute byte offset.
 
     Returns None if expr is None and default is None.
+
+    `default_since` is used as the implicit `since` for the expression when it
+    doesn't specify one. Used by tools to make `up_to` expressions search from
+    the resolved `since` by default.
     """
     if expr is None:
         return default
@@ -61,17 +100,19 @@ async def resolve_offset(
     if method is None:
         raise ValueError("Offset expression missing 'method' field")
 
+    _validate_expr(expr, method)
+
     match method:
         case "last_reconnect":
             return _last_event(port, "connected")
         case "last_disconnect":
             return _last_event(port, "disconnected")
         case "first_match":
-            return await _first_match(expr, port)
+            return await _first_match(expr, port, default_since)
         case "latest_match":
-            return await _latest_match(expr, port)
+            return await _latest_match(expr, port, default_since)
         case "wait_for_match":
-            return await _wait_for_match(expr, port)
+            return await _wait_for_match(expr, port, default_since)
         case _:
             raise ValueError(f"Unknown offset method: {method!r}")
 
@@ -93,24 +134,30 @@ def _match_offset(m: re.Match, text: str, buf_start: int, edge: str) -> int:
     return buf_start + prefix_bytes
 
 
-async def _resolve_after(expr: dict, port: PortState) -> int:
-    after_expr = expr.get("after")
-    if after_expr is None:
+async def _resolve_since(expr: dict, port: PortState, default_since: int | None) -> int:
+    """Resolve the `since` field of an expression. Falls back to default_since,
+    then to buffer start."""
+    since_expr = expr.get("since")
+    if since_expr is None:
+        if default_since is not None:
+            return default_since
         return port.buffer.start_offset
-    result = await resolve_offset(after_expr, port, default=0)
+    result = await resolve_offset(since_expr, port, default=0)
     assert result is not None
     return result
 
 
-async def _first_match(expr: dict, port: PortState) -> int:
+async def _first_match(
+    expr: dict, port: PortState, default_since: int | None
+) -> int:
     pattern = expr["pattern"]
     edge = expr.get("edge", "start")
-    after = await _resolve_after(expr, port)
+    since = await _resolve_since(expr, port, default_since)
 
     regex = re.compile(pattern)
-    data, start, end = port.buffer.read(after)
+    data, start, end = port.buffer.read(since)
     if not data:
-        raise ValueError(f"No data in buffer from offset {after}; pattern not found")
+        raise ValueError(f"No data in buffer from offset {since}; pattern not found")
 
     text = data.decode("utf-8", errors="replace")
     m = regex.search(text)
@@ -120,15 +167,17 @@ async def _first_match(expr: dict, port: PortState) -> int:
     return _match_offset(m, text, start, edge)
 
 
-async def _latest_match(expr: dict, port: PortState) -> int:
+async def _latest_match(
+    expr: dict, port: PortState, default_since: int | None
+) -> int:
     pattern = expr["pattern"]
     edge = expr.get("edge", "start")
-    after = await _resolve_after(expr, port)
+    since = await _resolve_since(expr, port, default_since)
 
     regex = re.compile(pattern)
-    data, start, end = port.buffer.read(after)
+    data, start, end = port.buffer.read(since)
     if not data:
-        raise ValueError(f"No data in buffer from offset {after}; pattern not found")
+        raise ValueError(f"No data in buffer from offset {since}; pattern not found")
 
     text = data.decode("utf-8", errors="replace")
     last_match = None
@@ -141,18 +190,20 @@ async def _latest_match(expr: dict, port: PortState) -> int:
     return _match_offset(last_match, text, start, edge)
 
 
-async def _wait_for_match(expr: dict, port: PortState) -> int:
+async def _wait_for_match(
+    expr: dict, port: PortState, default_since: int | None
+) -> int:
     pattern = expr["pattern"]
     edge = expr.get("edge", "start")
     timeout = float(expr.get("timeout", 10.0))
-    after = await _resolve_after(expr, port)
+    since = await _resolve_since(expr, port, default_since)
 
     regex = re.compile(pattern)
 
     with anyio.fail_after(timeout):
         async with port.condition:
             while True:
-                data, start, end = port.buffer.read(after)
+                data, start, end = port.buffer.read(since)
                 if data:
                     text = data.decode("utf-8", errors="replace")
                     m = regex.search(text)

@@ -113,21 +113,21 @@ SeriaLLM handles all of this server-side:
 ```
 grep(pattern="FAIL|ERROR",
      since={"method": "last_reconnect"},
-     up_to={"method": "wait_for_match", "pattern": "test complete",
-            "timeout": 30, "after": {"method": "last_reconnect"}})
+     up_to={"method": "wait_for_match", "pattern": "test complete", "timeout": 30})
 ```
 
 One call: waits for the test to finish, then returns every error/failure
-line from the current boot session.
+line from the current boot session. The `up_to` inherits its search start
+from the resolved `since`, so it can't match stale "test complete" lines
+from earlier sessions.
 
 **Send a command and read the response:**
 
 ```
 send(data="version\r\n")
 read_serial(since={"method": "first_match", "pattern": "version",
-                   "edge": "end", "after": -50},
-            up_to={"method": "wait_for_match", "pattern": ">",
-                   "timeout": 5, "after": -50})
+                   "edge": "end", "since": -50},
+            up_to={"method": "wait_for_match", "pattern": ">", "timeout": 5})
 ```
 
 **Reset a device and wait for boot:**
@@ -136,8 +136,7 @@ read_serial(since={"method": "first_match", "pattern": "version",
 set_control_lines(dtr=False, rts=True)
 set_control_lines(dtr=False, rts=False)
 read_serial(since={"method": "last_reconnect"},
-            up_to={"method": "wait_for_match", "pattern": "ready>",
-                   "timeout": 10, "after": {"method": "last_reconnect"}})
+            up_to={"method": "wait_for_match", "pattern": "ready>", "timeout": 10})
 ```
 
 ## Configuration

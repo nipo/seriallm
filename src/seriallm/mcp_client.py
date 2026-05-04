@@ -24,38 +24,46 @@ Integers:
 
 Expression objects (resolved server-side, avoiding round-trips):
   {"method": "last_reconnect"}
-      Byte offset of the most recent port connection event. Returns 0 if the
-      port has been connected since start. Use this to scope queries to the
-      current device session (e.g. after a reboot).
+      Byte offset of the most recent port connection event. Returns 0 if no
+      reconnect has happened. Use this to scope queries to the current device
+      session (e.g. after a reboot).
 
   {"method": "last_disconnect"}
       Byte offset of the most recent port disconnection event.
 
   {"method": "first_match", "pattern": "<regex>", "edge": "start"|"end"}
       Byte offset of the first regex match in the buffer. Error if not found.
-      "edge" selects the start or end of the matched text.
+      `edge` selects the start or end of the matched text.
 
   {"method": "latest_match", "pattern": "<regex>", "edge": "start"|"end"}
       Byte offset of the last regex match in the buffer. Error if not found.
 
   {"method": "wait_for_match", "pattern": "<regex>", "edge": "start"|"end", "timeout": <seconds>}
       Blocks until the pattern appears in the buffer, then resolves to the
-      match offset. Raises an error on timeout. Use this as `up_to` to wait
-      for a delimiter before reading/grepping.
+      match offset. Errors on timeout. Use this as `up_to` to wait for a
+      delimiter before reading/grepping.
 
-Chaining with "after":
-  All expressions accept an optional "after" field (itself an offset expression).
-  The search is constrained to data after the resolved "after" offset. This
-  avoids matching stale data from previous sessions.
+Constraining with `since`:
+  Match expressions accept an optional `since` field (itself an offset
+  expression) that limits the search to data after the resolved offset.
 
-  Example: wait for "done" but only after the last reconnect:
-    {"method": "wait_for_match", "pattern": "done", "timeout": 30,
-     "after": {"method": "last_reconnect"}}
+  Implicit defaulting: when an expression is used as the tool's `up_to`, its
+  `since` defaults to the tool's resolved `since`. So in:
+    grep(pattern="ERROR",
+         since={"method": "last_reconnect"},
+         up_to={"method": "wait_for_match", "pattern": "done", "timeout": 30})
+  the `up_to` searches for "done" starting from the resolved `last_reconnect`
+  offset, not from the buffer start. No need to repeat the constraint.
+
+  Override the implicit default by setting `since` explicitly on the inner
+  expression.
+
+Validation: unknown fields and invalid `edge` values produce errors — typos
+won't be silently ignored.
 
 PREFER offset expressions over manual offset tracking. Instead of calling
 get_port_events to find the reconnect offset, then calling read_serial with
-that offset, use a single call with {"method": "last_reconnect"} as `since`.
-This reduces round-trips and lets the server resolve everything atomically."""
+that offset, use a single call with {"method": "last_reconnect"} as `since`."""
 
 
 class McpProxy:
@@ -131,9 +139,8 @@ async def read_serial(
     To read a command response (between the command echo and the next prompt):
         read_serial(
             since={{"method": "first_match", "pattern": "my_command", "edge": "end",
-                    "after": -200}},
-            up_to={{"method": "wait_for_match", "pattern": ">", "timeout": 5,
-                    "after": -200}})
+                    "since": -200}},
+            up_to={{"method": "wait_for_match", "pattern": ">", "timeout": 5}})
     {OFFSET_DOC}"""
     assert _proxy is not None
     return await _proxy.call("read_serial", since=since, up_to=up_to, port_id=port_id)
@@ -269,10 +276,11 @@ async def grep(
         grep(pattern="ERROR|FAIL",
              since={{"method": "last_reconnect"}},
              up_to={{"method": "wait_for_match", "pattern": "test complete",
-                     "timeout": 30, "after": {{"method": "last_reconnect"}}}})
+                     "timeout": 30}})
 
-    This single call: waits for the test to finish, then returns every matching
-    line from the current boot session. No intermediate calls needed.
+    The `up_to` inherits its search start from the resolved `since`, so it
+    waits for the next "test complete" after the reconnect — not stale ones
+    from earlier sessions. Single call, no intermediate steps.
 
     Returns a list of {{line, offset, line_number}} for each matching/context line.
     {OFFSET_DOC}"""

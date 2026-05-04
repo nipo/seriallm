@@ -59,8 +59,10 @@ class ToolExecutor:
     ) -> dict:
         port = self._get_port(port_id)
         since_val = await resolve_offset(since, port, default=0)
-        up_to_val = await resolve_offset(up_to, port, default=None)
         assert since_val is not None
+        up_to_val = await resolve_offset(
+            up_to, port, default=None, default_since=since_val
+        )
         data, start, end = port.buffer.read(since_val, up_to_val)
         return {
             "data": data.decode("utf-8", errors="replace"),
@@ -156,8 +158,10 @@ class ToolExecutor:
     ) -> dict:
         port = self._get_port(port_id)
         since_val = await resolve_offset(since, port, default=0)
-        up_to_val = await resolve_offset(up_to, port, default=None)
         assert since_val is not None
+        up_to_val = await resolve_offset(
+            up_to, port, default=None, default_since=since_val
+        )
         data, start, end = port.buffer.read(since_val, up_to_val)
         out = Path(path).expanduser()
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -174,8 +178,10 @@ class ToolExecutor:
     ) -> list[dict]:
         port = self._get_port(port_id)
         since_val = await resolve_offset(since, port, default=0)
-        up_to_val = await resolve_offset(up_to, port, default=None)
         assert since_val is not None
+        up_to_val = await resolve_offset(
+            up_to, port, default=None, default_since=since_val
+        )
         data, start, end = port.buffer.read(since_val, up_to_val)
         if not data:
             return []
