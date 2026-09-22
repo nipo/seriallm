@@ -72,6 +72,17 @@ and start using the tools — the server and MCP client handle everything
 automatically. Attach a terminal later with `seriallm <port>` to see
 live output.
 
+### Companion skill
+
+`agents/skills/seriallm-offsets/` documents the byte-range and pattern
+matching system the tools share: the buffer offset model, `since`/`up_to`
+semantics and every offset expression. Copy or symlink it into your
+agent's skills directory so the tool descriptions can stay short:
+
+```bash
+ln -s "$PWD/agents/skills/seriallm-offsets" ~/.claude/skills/
+```
+
 ## What can an agent do with it?
 
 An LLM agent connected via MCP can:

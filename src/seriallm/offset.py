@@ -1,34 +1,9 @@
 """Offset expression resolver.
 
-Offset parameters in tools accept:
-- An integer: absolute byte offset (negative counts from buffer end).
-- A dict: an expression resolved server-side.
-
-Expression types:
-  {"method": "last_reconnect"}
-      Offset of the last "connected" event. Returns 0 if no events.
-
-  {"method": "last_disconnect"}
-      Offset of the last "disconnected" event. Returns 0 if no events.
-
-  {"method": "first_match", "pattern": "...", "edge": "start"|"end", "since": <expr>}
-      First regex match in the buffer, searching forward from `since`.
-      Error if not found.
-
-  {"method": "latest_match", "pattern": "...", "edge": "start"|"end", "since": <expr>}
-      Last regex match in the buffer, searching from `since` to end.
-      Error if not found.
-
-  {"method": "wait_for_match", "pattern": "...", "edge": "start"|"end",
-   "timeout": float, "since": <expr>}
-      Like first_match but blocks until found or timeout.
-
-The optional "since" field on each expression constrains the search to data
-after the resolved offset. Defaults to buffer start.
-
-When an expression appears as the tool's `up_to` argument, its `since` field
-defaults to the tool's resolved `since` value (so "wait for X" naturally means
-"wait for the next X after the start of the range").
+Offset parameters in tools accept an integer (absolute, or relative to the
+buffer end when negative) or a dict describing an expression resolved
+server-side. `_ALLOWED_FIELDS` below is the authoritative list of methods and
+their fields; the agent-facing semantics live in the `seriallm-offsets` skill.
 """
 
 from __future__ import annotations
