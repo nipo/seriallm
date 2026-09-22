@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import websockets.asyncio.client
 import websockets.exceptions
-from mcp.server import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 if TYPE_CHECKING:
     from seriallm.config import Config
 
-mcp = FastMCP("seriallm")
+mcp = MCPServer("seriallm")
 
 # Tools taking a `since`/`up_to` range get their description built from this
 # hint, so the range model is documented in exactly one place. It has to be
@@ -31,7 +32,12 @@ composing anything beyond a plain integer."""
 
 
 class McpProxy:
-    """Sends JSON-RPC requests over WebSocket and awaits responses."""
+    """Sends JSON-RPC requests over WebSocket and awaits responses.
+
+    Failures are reported as ToolError: any other exception type has its
+    message withheld from the model, and the server-side text is what tells
+    the caller what went wrong.
+    """
 
     def __init__(self, ws: websockets.asyncio.client.ClientConnection) -> None:
         self._ws = ws
@@ -66,7 +72,7 @@ class McpProxy:
                 if req_id is None or req_id not in self._pending:
                     continue
                 if "error" in msg:
-                    self._results[req_id] = RuntimeError(
+                    self._results[req_id] = ToolError(
                         msg["error"].get("message", "Unknown error")
                     )
                 else:
@@ -74,7 +80,7 @@ class McpProxy:
                 self._pending[req_id].set()
         except (websockets.exceptions.ConnectionClosed, OSError):
             for req_id, event in self._pending.items():
-                self._results[req_id] = RuntimeError("Server connection lost")
+                self._results[req_id] = ToolError("Server connection lost")
                 event.set()
 
 
@@ -97,7 +103,7 @@ async def read_serial(
     since: int | dict | None = 0,
     up_to: int | dict | None = None,
     port_id: str = "default",
-) -> dict:
+) -> dict[str, Any]:
     assert _proxy is not None
     return await _proxy.call("read_serial", since=since, up_to=up_to, port_id=port_id)
 
@@ -156,7 +162,7 @@ async def send_break(
 
 
 @mcp.tool()
-async def get_port_info(port_id: str = "default") -> dict:
+async def get_port_info(port_id: str = "default") -> dict[str, Any]:
     """Get serial port status: baud rate, control lines, buffer offsets, connection state.
 
     The reported buffer_start and buffer_end tell how much history is still
@@ -180,7 +186,7 @@ an offset from here.
 async def get_port_events(
     since: int | dict | None = 0,
     port_id: str = "default",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     assert _proxy is not None
     return await _proxy.call("get_port_events", since=since, port_id=port_id)
 
@@ -207,7 +213,7 @@ async def dump_to_file(
     since: int | dict | None = 0,
     up_to: int | dict | None = None,
     port_id: str = "default",
-) -> dict:
+) -> dict[str, Any]:
     assert _proxy is not None
     return await _proxy.call(
         "dump_to_file", path=path, since=since, up_to=up_to, port_id=port_id
@@ -230,7 +236,7 @@ async def grep(
     up_to: int | dict | None = None,
     context: int = 0,
     port_id: str = "default",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     assert _proxy is not None
     return await _proxy.call(
         "grep", pattern=pattern, since=since, up_to=up_to, context=context, port_id=port_id
@@ -238,7 +244,7 @@ async def grep(
 
 
 @mcp.tool()
-async def list_ports() -> list[dict]:
+async def list_ports() -> list[dict[str, Any]]:
     """List all currently attached serial ports with their connection status and baud rate.
 
     Returns a list of {port_id, url, connected, baudrate}. Use port_id values

@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Software Development :: Embedded Systems",
 ]
 dependencies = [
-    "mcp>=1.26",
+    "mcp>=2.0",
     "pyserial>=3.5",
     "uvicorn",
     "starlette",
