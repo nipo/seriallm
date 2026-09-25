@@ -1,6 +1,6 @@
 ---
 name: seriallm-offsets
-description: Use when calling seriallm serial tools (read_serial, grep, dump_to_file, get_port_events) and picking a `since`/`up_to` byte range, or writing an offset expression such as last_reconnect, first_match, latest_match or wait_for_match. Covers the ring-buffer offset model, range semantics, match scoping, blocking waits and their failure modes.
+description: Use when calling seriallm serial tools (read_serial, grep, dump_to_file, get_port_events, resolve_offset) and picking a `since`/`up_to` byte range, or writing an offset expression such as last_reconnect, first_match, latest_match or wait_for_match. Covers the ring-buffer offset model, range semantics, match scoping, blocking waits and their failure modes.
 ---
 
 # Serial buffer ranges and offset expressions
@@ -21,6 +21,10 @@ intermediate round-trip.
   window. Compare the `start` you asked for with the `start` you got back
   to detect that data was dropped.
 - NUL bytes are stripped from the stream before buffering.
+- Received bytes are timestamped per read batch, in float epoch seconds.
+  `read_serial` and `dump_to_file` report `start_time`/`end_time` for the
+  first and last bytes of the range, `grep` a `time` per line (its first
+  byte), and `get_port_events` a `time` per event. See "Timestamps" below.
 
 ## Ranges
 
@@ -128,6 +132,32 @@ their searched range is empty; `wait_for_match` errors on timeout. All
 three abort the whole tool call, so a failed `up_to` returns no data even
 if the range start was fine. When a marker is merely likely, prefer a
 plain integer `up_to`, or `grep` for the marker first.
+
+## Timestamps
+
+`resolve_offset(offset)` resolves any offset expression, as it would be
+resolved in a range parameter, and returns `{offset, time}`: `time` is when
+the byte at `offset` was received. It is null when that byte is not in the
+buffer, in particular for the buffer end.
+
+Several bytes received in one read share a timestamp, so times are
+accurate to one serial read, not to one byte.
+
+To timestamp a marker, resolve a match with `edge: "start"`: an `"end"`
+edge points past the marker, at a byte that may not have arrived yet.
+A match is only bounded by its `since`; to require it to lie between
+offsets X and Y, check that the returned `offset` is below Y.
+
+```
+resolve_offset(offset={"method": "first_match", "pattern": "boot done",
+                       "since": {"method": "last_reconnect"}})
+```
+
+Subtract two such times to measure a duration. The time of an event
+itself, such as the moment the port reconnected, comes from
+`get_port_events`: resolving `last_reconnect` gives the time of the first
+byte received after it. `grep` times are those of line starts,
+which can precede the matched text on slowly printed lines.
 
 ## Recipes
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 
 import anyio
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -19,9 +20,9 @@ async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:
     while True:
         async with port.condition:
             while True:
-                data, _, new_cursor = port.buffer.read(cursor)
+                segments = port.buffer.read_segments(cursor)
                 connected_changed = port.connected != was_connected
-                if data or connected_changed:
+                if segments or connected_changed:
                     break
                 await port.condition.wait()
 
@@ -33,10 +34,13 @@ async def _buffer_follower(port: PortState, websocket: WebSocket) -> None:
                 msg = {"type": "waiting"}
             await websocket.send_text(json.dumps(msg))
 
-        if data:
-            cursor = new_cursor
+        # Each binary frame is the receive timestamp of its bytes, as a
+        # big-endian double, followed by the bytes.
+        for offset, timestamp, data in segments:
+            header = struct.pack("!d", timestamp)
             for i in range(0, len(data), _WS_CHUNK_SIZE):
-                await websocket.send_bytes(data[i:i + _WS_CHUNK_SIZE])
+                await websocket.send_bytes(header + data[i:i + _WS_CHUNK_SIZE])
+            cursor = offset + len(data)
 
 
 async def _ws_receive_loop(

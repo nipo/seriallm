@@ -93,9 +93,11 @@ _proxy: McpProxy | None = None
 @mcp.tool(
     description=f"""Read data received from the serial port.
 
-Returns {{data, start, end}} where `start` and `end` are the byte offsets the
-returned data actually spans. Pass `end` back as the next call's `since` to
-keep reading without gaps or overlap.
+Returns {{data, start, end, start_time, end_time}} where `start` and `end`
+are the byte offsets the returned data actually spans. Pass `end` back as the
+next call's `since` to keep reading without gaps or overlap. `start_time` and
+`end_time` are the receive times of the first and last returned bytes, in
+float epoch seconds, null when no data is returned.
 
 {RANGE_HINT}"""
 )
@@ -176,8 +178,8 @@ async def get_port_info(port_id: str = "default") -> dict[str, Any]:
 @mcp.tool(
     description=f"""Get connection/disconnection events for a serial port.
 
-Returns a list of {{offset, event}} objects, for inspecting the reconnection
-history itself. To merely scope a query to the current device session, use
+Returns a list of {{offset, time, event}} objects, for inspecting the
+reconnection history itself. `time` is in float epoch seconds. To merely scope a query to the current device session, use
 {{"method": "last_reconnect"}} as another tool's `since` rather than reading
 an offset from here.
 
@@ -204,7 +206,8 @@ async def set_baudrate(baudrate: int, port_id: str = "default") -> str:
 Writes raw bytes straight to disk without shipping them through MCP. Use this
 to extract log segments for offline analysis with external tools.
 
-Returns {{path, start, end, bytes_written}}.
+Returns {{path, start, end, bytes_written, start_time, end_time}}, with times
+as in read_serial.
 
 {RANGE_HINT}"""
 )
@@ -224,8 +227,9 @@ async def dump_to_file(
     description=f"""Search for a regex pattern in the serial port buffer, line by line.
 
 Matching runs server-side, so the buffer is not transferred. Returns a list of
-{{line, offset, line_number}} for each matching line, where `offset` is the
-absolute byte offset of the line start. `context` includes surrounding lines,
+{{line, offset, time, line_number}} for each matching line, where `offset` is
+the absolute byte offset of the line start and `time` the receive time of its
+first byte, in float epoch seconds. `context` includes surrounding lines,
 like grep -C.
 
 {RANGE_HINT}"""
@@ -241,6 +245,25 @@ async def grep(
     return await _proxy.call(
         "grep", pattern=pattern, since=since, up_to=up_to, context=context, port_id=port_id
     )
+
+
+@mcp.tool(
+    description=f"""Resolve an offset expression to an absolute offset and its receive time.
+
+Returns {{offset, time}}, where `time` is the receive time of the byte at
+`offset` in float epoch seconds, or null when that byte is not in the buffer
+(e.g. `offset` is the buffer end). Use it to timestamp an event without
+reading data, e.g. offset={{"method": "first_match", "pattern": "boot done",
+"since": X}}.
+
+{RANGE_HINT}"""
+)
+async def resolve_offset(
+    offset: int | dict,
+    port_id: str = "default",
+) -> dict[str, Any]:
+    assert _proxy is not None
+    return await _proxy.call("resolve_offset", offset=offset, port_id=port_id)
 
 
 @mcp.tool()

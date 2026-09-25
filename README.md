@@ -19,6 +19,9 @@ devices while the user sees everything live.
 - Server/client architecture: multiple terminals and MCP clients share
   one server, server auto-spawns on first use and exits when idle
 - Config file with port aliases and serial profiles
+- Received data is timestamped: MCP tools report receive times next to
+  offsets, and the terminal can prefix lines with absolute or relative
+  times
 
 ## Installation
 
@@ -150,6 +153,16 @@ read_serial(since={"method": "last_reconnect"},
             up_to={"method": "wait_for_match", "pattern": "ready>", "timeout": 10})
 ```
 
+**Measure boot time:**
+
+```
+resolve_offset(offset={"method": "first_match", "pattern": "ready>",
+                       "since": {"method": "last_reconnect"}})
+```
+
+Returns `{offset, time}`: subtract the `time` of the last `connected`
+event from `get_port_events` to get the boot duration.
+
 ## Configuration
 
 Config file: `~/.config/seriallm/config.yaml`
@@ -212,6 +225,7 @@ The server is auto-spawned if not already running.
 |---|---|
 | `--name NAME` | Port name visible in MCP tools (default: alias name or URL) |
 | `--raw` | Raw terminal mode (no output filtering) |
+| `-t`, `--timestamps abs\|rel` | Prefix each line with the receive time of its first byte: wall time (`abs`) or delta to the previous line (`rel`). Not compatible with `--raw` |
 | `--server URL` | Connect to a specific server instead of config/auto-spawn |
 | `--config PATH` | Use a custom config file |
 

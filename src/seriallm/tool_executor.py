@@ -31,6 +31,7 @@ class ToolExecutor:
         "list_ports": "list_ports",
         "dump_to_file": "dump_to_file",
         "grep": "grep",
+        "resolve_offset": "resolve_offset",
     }
 
     def __init__(self, app_state: AppState) -> None:
@@ -68,6 +69,16 @@ class ToolExecutor:
             "data": data.decode("utf-8", errors="replace"),
             "start": start,
             "end": end,
+            **self.__range_times(port, start, end),
+        }
+
+    @staticmethod
+    def __range_times(port: PortState, start: int, end: int) -> dict:
+        if start >= end:
+            return {"start_time": None, "end_time": None}
+        return {
+            "start_time": port.buffer.time_at(start),
+            "end_time": port.buffer.time_at(end - 1),
         }
 
     async def send(self, data: str, port_id: str = "default") -> str:
@@ -137,8 +148,8 @@ class ToolExecutor:
         since_val = await resolve_offset(since, port, default=0)
         assert since_val is not None
         return [
-            {"offset": offset, "event": event}
-            for offset, event in port.events
+            {"offset": offset, "time": timestamp, "event": event}
+            for offset, timestamp, event in port.events
             if offset >= since_val
         ]
 
@@ -166,7 +177,13 @@ class ToolExecutor:
         out = Path(path).expanduser()
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data)
-        return {"path": str(out), "start": start, "end": end, "bytes_written": len(data)}
+        return {
+            "path": str(out),
+            "start": start,
+            "end": end,
+            "bytes_written": len(data),
+            **self.__range_times(port, start, end),
+        }
 
     async def grep(
         self,
@@ -207,10 +224,19 @@ class ToolExecutor:
             {
                 "line": lines[i],
                 "offset": start + line_offsets[i],
+                "time": port.buffer.time_at(start + line_offsets[i]),
                 "line_number": i,
             }
             for i in sorted(matched_lines)
         ]
+
+    async def resolve_offset(
+        self, offset: OffsetExpr, port_id: str = "default"
+    ) -> dict:
+        port = self._get_port(port_id)
+        offset_val = await resolve_offset(offset, port)
+        assert offset_val is not None
+        return {"offset": offset_val, "time": port.buffer.time_at(offset_val)}
 
     def list_ports(self) -> list[dict]:
         return [

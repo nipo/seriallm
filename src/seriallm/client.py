@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import sys
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
@@ -80,7 +81,8 @@ async def _ws_session(
                 try:
                     async for message in ws:
                         if isinstance(message, bytes):
-                            write_output(message, output_filter)
+                            (timestamp,) = struct.unpack_from("!d", message)
+                            write_output(message[8:], timestamp, output_filter)
                         else:
                             try:
                                 msg = json.loads(message)
@@ -91,8 +93,10 @@ async def _ws_session(
                                 write_status(
                                     f"\r\n[Port opened: {msg.get('url')} @ {msg.get('baudrate')}]\r\n"
                                 )
+                                output_filter.mark_line_start()
                             elif msg_type == "waiting":
                                 write_status("\r\n[Port lost, waiting...]\r\n")
+                                output_filter.mark_line_start()
                 except (websockets.exceptions.ConnectionClosed, OSError, anyio.ClosedResourceError):
                     pass
                 session_done.set()
@@ -134,12 +138,13 @@ async def run_client(
     baudrate: int,
     name: str,
     raw: bool,
+    timestamps: str | None = None,
     config: Config | None = None,
 ) -> None:
     params = urlencode({"url": serial_url, "baudrate": baudrate, "name": name})
     path = f"/ws?{params}"
 
-    output_filter = OutputFilter(raw=raw)
+    output_filter = OutputFilter(raw=raw, timestamps=timestamps)
     is_tty = sys.stdin.isatty()
     quit_event = anyio.Event()
 
@@ -150,6 +155,7 @@ async def run_client(
         while not quit_event.is_set():
             if not first:
                 write_status("\r\n[Disconnected, reconnecting...]\r\n")
+                output_filter.mark_line_start()
                 await anyio.sleep(2.0)
                 if quit_event.is_set():
                     return

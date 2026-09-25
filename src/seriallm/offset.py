@@ -93,7 +93,7 @@ async def resolve_offset(
 
 
 def _last_event(port: PortState, event_type: str) -> int:
-    for offset, event in reversed(port.events):
+    for offset, _, event in reversed(port.events):
         if event == event_type:
             return offset
     return 0

@@ -38,6 +38,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_attach.add_argument("baudrate", nargs="?", type=int, default=None)
     sp_attach.add_argument("--name", default=None, help="Port name (default: alias or URL)")
     sp_attach.add_argument("--raw", action="store_true", help="Raw terminal mode")
+    sp_attach.add_argument(
+        "-t", "--timestamps", choices=("abs", "rel"), default=None,
+        help="Prefix lines with receive time: wall time (abs) or delta to previous line (rel)",
+    )
     sp_attach.add_argument("--server", default=None, help="Server URL (overrides config)")
 
     # --- mcp ---
@@ -66,7 +70,11 @@ def parse_args() -> argparse.Namespace:
     # Bare invocation with a URL/alias maps to "attach"
     if first_pos is not None and sys.argv[first_pos] not in subcommands:
         sys.argv.insert(first_pos, "attach")
-    return _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.command == "attach" and args.raw and args.timestamps:
+        parser.error("--timestamps cannot be used with --raw")
+    return args
 
 
 # --- Subcommand handlers ---
@@ -147,7 +155,7 @@ async def _async_attach(args: argparse.Namespace, config: Config) -> None:
         else:
             server_url = f"http://{config.server.host}:{config.server.port}"
 
-    await run_client(server_url, serial_url, baudrate, name, args.raw, config)
+    await run_client(server_url, serial_url, baudrate, name, args.raw, args.timestamps, config)
 
 
 async def _async_mcp(config: Config) -> None:

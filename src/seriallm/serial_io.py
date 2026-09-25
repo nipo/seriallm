@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import anyio
@@ -40,15 +41,15 @@ async def serial_reader_task(
         # Read loop
         try:
             while not shutdown_event.is_set():
-                data = await anyio.to_thread.run_sync(
-                    lambda: ser.read(ser.in_waiting or 1),
+                data, timestamp = await anyio.to_thread.run_sync(
+                    lambda: (ser.read(ser.in_waiting or 1), time.time()),
                     abandon_on_cancel=True,
                 )
                 if data:
                     data = data.replace(b"\x00", b"")
                 if data:
                     async with port.condition:
-                        port.buffer.append(data)
+                        port.buffer.append(data, timestamp)
                         port.condition.notify_all()
         except (serial.SerialException, OSError):
             pass
